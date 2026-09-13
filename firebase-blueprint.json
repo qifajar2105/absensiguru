@@ -1,0 +1,34 @@
+{
+  "collections": [
+    {
+      "name": "users",
+      "fields": {
+        "uid": "string",
+        "email": "string",
+        "name": "string",
+        "role": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    {
+      "name": "attendance",
+      "fields": {
+        "teacherId": "string",
+        "teacherName": "string",
+        "date": "string",
+        "timestamp": "timestamp",
+        "status": "string",
+        "location": "map",
+        "distanceFromSchool": "number"
+      }
+    },
+    {
+      "name": "school_settings",
+      "fields": {
+        "id": "string",
+        "location": "map",
+        "radius": "number"
+      }
+    }
+  ]
+}

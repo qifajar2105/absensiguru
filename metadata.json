@@ -1,0 +1,11 @@
+{
+  "name": "Sistem Absensi Guru",
+  "description": "Aplikasi absensi guru dengan pelacakan lokasi GPS, QR code dinamis, mode offline, dan rekapitulasi otomatis.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
