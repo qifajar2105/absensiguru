@@ -5,7 +5,7 @@ import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/fires
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { QrReader } from 'react-qr-reader';
+import { Scanner } from '@yudiel/react-qr-scanner';
 import { calculateDistance, validateQRPayload } from '../lib/utils';
 import { LogOut, Scan, MapPin, CheckCircle, AlertCircle, WifiOff } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -226,15 +226,20 @@ export default function TeacherDashboard() {
             {scanning && (
               <div className="space-y-4">
                 <div className="w-full overflow-hidden rounded-xl border-2 border-dashed border-gray-300">
-                  <QrReader
-                    onResult={(result, error) => {
-                      if (result) {
+                  <Scanner
+                    onScan={(result) => {
+                      if (result && result.length > 0) {
                         setScanning(false);
-                        handleScanSuccess(result.getText());
+                        handleScanSuccess(result[0].rawValue);
                       }
                     }}
-                    constraints={{ facingMode: 'environment' }}
-                    className="w-full"
+                    onError={(error: any) => {
+                      toast.error('Gagal mengakses kamera: ' + error.message);
+                    }}
+                    components={{
+                      audio: false,
+                      finder: true
+                    }}
                   />
                 </div>
                 <button

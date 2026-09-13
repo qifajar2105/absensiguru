@@ -309,6 +309,32 @@ export default function AdminDashboard() {
                   </div>
 
                   <div>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        if ('geolocation' in navigator) {
+                          navigator.geolocation.getCurrentPosition(
+                            (position) => {
+                              setSchoolLocation({
+                                lat: position.coords.latitude,
+                                lng: position.coords.longitude
+                              });
+                            },
+                            (error) => alert('Gagal mendapatkan lokasi. Pastikan GPS aktif.'),
+                            { enableHighAccuracy: true }
+                          );
+                        } else {
+                          alert('Browser Anda tidak mendukung Geolocation.');
+                        }
+                      }}
+                      className="flex items-center text-sm text-blue-600 hover:text-blue-800 transition-colors font-medium"
+                    >
+                      <MapPin className="w-4 h-4 mr-1" />
+                      Dapatkan Otomatis dari Lokasi Saya Saat Ini
+                    </button>
+                  </div>
+
+                  <div>
                     <label className="block text-sm font-medium text-gray-700">Batas Radius Toleransi Absensi (Meter)</label>
                     <input 
                       type="number" 
