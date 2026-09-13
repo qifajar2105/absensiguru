@@ -7,28 +7,56 @@ service cloud.firestore {
       return request.auth != null;
     }
     
+    function isMasterAdmin() {
+      return isAuthenticated() && request.auth.token.email == 'muhammadfajar.qf210521@gmail.com';
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        isMasterAdmin() ||
+        exists(/databases/$(database)/documents/super_admins/$(request.auth.token.email))
+      );
+    }
+
     function isAdmin() {
-      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
     }
 
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    match /super_admins/{adminEmail} {
+      // Authenticated users can read the whitelist to verify permissions
+      allow read: if isAuthenticated();
+      // Only authorized super admins can modify the whitelist (and client blocks modifying master admin)
+      allow write: if isSuperAdmin();
+    }
+
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow write: if isOwner(userId) || isAdmin();
+      allow read: if isOwner(userId) || isAdmin() || isSuperAdmin();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update, delete: if isOwner(userId) || isAdmin() || isSuperAdmin();
     }
     
     match /attendance/{docId} {
-      allow read: if isAdmin() || (isAuthenticated() && resource.data.teacherId == request.auth.uid);
+      allow read: if isAdmin() || isSuperAdmin() || (isAuthenticated() && resource.data.teacherId == request.auth.uid);
       allow create: if isAuthenticated() && request.resource.data.teacherId == request.auth.uid;
-      allow update, delete: if isAdmin();
+      allow update, delete: if isAdmin() || isSuperAdmin();
     }
     
     match /school_settings/{docId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    match /licenses/{docId} {
+      // Allow reading so teachers and admins can validate school license code during registration
+      allow read: if true;
+      allow write: if isSuperAdmin();
     }
   }
 }

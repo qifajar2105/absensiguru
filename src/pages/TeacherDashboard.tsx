@@ -7,12 +7,17 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { calculateDistance, validateQRPayload } from '../lib/utils';
-import { LogOut, Scan, MapPin, CheckCircle, AlertCircle, WifiOff } from 'lucide-react';
+import { LogOut, Scan, MapPin, CheckCircle, AlertCircle, WifiOff, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { ThemeLanguageToggle } from '../components/ThemeLanguageToggle';
+import { translations } from '../lib/translations';
+import { isMasterSuperAdmin } from '../lib/superAdminAuth';
 
 export default function TeacherDashboard() {
-  const { userData } = useStore();
+  const { userData, language, setUserData } = useStore();
+  const t = translations[language] || translations.id;
   const navigate = useNavigate();
+
   const [scanning, setScanning] = useState(false);
   const [location, setLocation] = useState<{lat: number, lng: number} | null>(null);
   const [locating, setLocating] = useState(false);
@@ -21,6 +26,10 @@ export default function TeacherDashboard() {
   const [attendanceStatus, setAttendanceStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  const isSuperAdmin = 
+    userData?.role === 'superadmin' || 
+    isMasterSuperAdmin(userData?.email);
 
   useEffect(() => {
     // Check network status for offline notification
@@ -32,16 +41,22 @@ export default function TeacherDashboard() {
     // Fetch School Settings
     const fetchSettings = async () => {
       try {
-        const docRef = doc(db, 'school_settings', 'main');
-        const docSnap = await getDoc(docRef);
+        const schoolKey = userData?.schoolCode ? userData.schoolCode.toUpperCase() : 'main';
+        let docRef = doc(db, 'school_settings', schoolKey);
+        let docSnap = await getDoc(docRef);
+        if (!docSnap.exists() && schoolKey !== 'main') {
+          docRef = doc(db, 'school_settings', 'main');
+          docSnap = await getDoc(docRef);
+        }
         if (docSnap.exists()) {
           const data = docSnap.data() as any;
           setSchoolSettings(data);
-          localStorage.setItem('cached_school_settings', JSON.stringify(data));
+          localStorage.setItem(`cached_school_settings_${schoolKey}`, JSON.stringify(data));
         }
       } catch (err) {
-        console.log("Could not fetch settings (might be offline). Using defaults or cache.");
-        const cached = localStorage.getItem('cached_school_settings');
+        console.log("Could not fetch settings. Using cache if available.", err);
+        const schoolKey = userData?.schoolCode ? userData.schoolCode.toUpperCase() : 'main';
+        const cached = localStorage.getItem(`cached_school_settings_${schoolKey}`) || localStorage.getItem('cached_school_settings');
         if (cached) {
           setSchoolSettings(JSON.parse(cached));
         }
@@ -55,29 +70,17 @@ export default function TeacherDashboard() {
     };
   }, []);
 
-  useEffect(() => {
-    // We handle QR scanning in the render block via QrReader component now
-  }, [scanning, location]);
-
   const getLocation = () => {
     setLocating(true);
     setLocationError('');
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          // Heuristic Anti-Fake GPS Detection
-          // Aplikasi Fake GPS di web seringkali memiliki anomali pada metadata koordinat
-          // 1. Akurasi (accuracy) yang tidak wajar (misal: selalu absolut/persis di angka tertentu)
-          // 2. Ketiadaan data pergerakan (heading/speed) atau ketinggian pada perangkat modern
+          const { latitude, longitude } = position.coords;
           
-          const { latitude, longitude, accuracy } = position.coords;
-
-          // Deteksi akurasi tidak masuk akal (biasanya fake GPS menyetel akurasi buatan yang terlalu sempurna misal < 5 meter di dalam ruangan)
-          // Tapi kita biarkan lolos jika perangkat memang bagus, kita hanya tandai.
-          
-          // @ts-ignore - Beberapa browser bereksperimen dengan properti 'mocked'
+          // @ts-ignore - Check for mock location flag if provided
           if (position.coords.mocked === true) {
-            setLocationError('Terdeteksi penggunaan aplikasi Fake GPS (Mock Location). Harap matikan aplikasi emulator lokasi Anda.');
+            setLocationError(t.fakeGpsWarning);
             setLocating(false);
             return;
           }
@@ -88,54 +91,58 @@ export default function TeacherDashboard() {
           });
           setLocating(false);
         },
-        (error) => {
-          setLocationError('Gagal mendapatkan lokasi. Pastikan GPS aktif dan izinkan akses lokasi (Anti-Fake GPS aktif).');
+        () => {
+          setLocationError(t.geoFailed);
           setLocating(false);
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     } else {
-      setLocationError('Geolocation tidak didukung di browser ini.');
+      setLocationError(t.geoNotSupported);
       setLocating(false);
     }
   };
 
   const handleScanSuccess = async (qrData: string) => {
     if (!location) {
-      toast.error('Lokasi belum ditemukan!');
+      toast.error(t.locNotFound);
       setAttendanceStatus('error');
-      setStatusMessage('Lokasi belum ditemukan. Silakan dapatkan lokasi Anda terlebih dahulu.');
+      setStatusMessage(t.locNotFound);
       return;
     }
 
-    if (!validateQRPayload(qrData)) {
-      toast.error('QR Code tidak valid!');
+    if (!validateQRPayload(qrData, userData?.schoolCode)) {
+      toast.error(t.qrInvalid);
       setAttendanceStatus('error');
-      setStatusMessage('QR Code tidak valid atau sudah kadaluarsa (Dynamic Protection).');
+      setStatusMessage(t.qrInvalid);
       return;
     }
 
     // Geofencing Check: Distance calculation between Device GPS and Firestore School Coordinates
+    const targetLat = (schoolSettings as any).location?.lat ?? schoolSettings.lat;
+    const targetLng = (schoolSettings as any).location?.lng ?? schoolSettings.lng;
+
     const distance = calculateDistance(
       location.lat, 
       location.lng, 
-      schoolSettings.lat, 
-      schoolSettings.lng
+      targetLat, 
+      targetLng
     );
 
     if (distance > schoolSettings.radius) {
-      toast.error(`Di luar jangkauan lokasi! Jarak Anda: ${Math.round(distance)}m`);
+      const msg = `${t.outsideRadius} ${Math.round(distance)}m (${t.outsideRadiusDesc})`;
+      toast.error(msg);
       setAttendanceStatus('error');
-      setStatusMessage(`Anda berada di luar radius sekolah. (Jarak Anda: ${Math.round(distance)}m, Batas: ${schoolSettings.radius}m). Anti-Fake GPS diaktifkan.`);
+      setStatusMessage(msg);
       return;
     }
 
     try {
-      // Create attendance record
-      // Firestore offline persistence will automatically cache this if offline
       await addDoc(collection(db, 'attendance'), {
         teacherId: userData?.uid,
         teacherName: userData?.name,
+        schoolCode: userData?.schoolCode ? userData.schoolCode.toUpperCase() : 'DEFAULT',
+        schoolName: userData?.schoolName || '',
         date: format(new Date(), 'yyyy-MM-dd'),
         timestamp: serverTimestamp(),
         status: 'Hadir',
@@ -144,88 +151,121 @@ export default function TeacherDashboard() {
       });
 
       const successMsg = isOffline 
-        ? 'Absensi OFFLINE dicatat. Menunggu sinkronisasi internet.' 
-        : 'Absensi berhasil dicatat!';
+        ? t.attendanceOfflineSaved 
+        : t.attendanceSaved;
       
       toast.success(successMsg);
       setAttendanceStatus('success');
       setStatusMessage(successMsg);
     } catch (err: any) {
-      toast.error('Terjadi kesalahan sistem.');
+      toast.error(`${t.failed}: ${err.message}`);
       setAttendanceStatus('error');
-      setStatusMessage(`Terjadi kesalahan: ${err.message}`);
+      setStatusMessage(`${t.failed}: ${err.message}`);
     }
   };
 
   const handleLogout = async () => {
     await signOut(auth);
+    setUserData(null);
     navigate('/login');
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center">
-        <div>
-          <h1 className="text-xl font-bold text-blue-600">Absensi Guru</h1>
-          <p className="text-sm text-gray-500">Halo, {userData?.name}</p>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col transition-colors duration-300">
+      <header className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shadow-xs px-4 sm:px-6 py-3.5 flex justify-between items-center sticky top-0 z-50 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center border border-blue-100 dark:border-blue-800/50">
+            <Scan className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-gray-900 dark:text-white leading-tight">
+              {t.appTitle}
+            </h1>
+            <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+              {t.hello}, <span className="font-semibold text-gray-700 dark:text-gray-300">{userData?.name}</span>
+            </p>
+          </div>
         </div>
-        <button onClick={handleLogout} className="p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors">
-          <LogOut className="w-5 h-5" />
-        </button>
+
+        <div className="flex items-center space-x-2">
+          {isSuperAdmin && (
+            <button
+              onClick={() => navigate('/superadmin')}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-xs font-bold transition-colors"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Super Admin</span>
+            </button>
+          )}
+          <ThemeLanguageToggle />
+          <button 
+            onClick={handleLogout} 
+            className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all" 
+            title={t.logout}
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
       </header>
 
-      <main className="flex-1 p-4 flex flex-col items-center">
+      <main className="flex-1 p-4 sm:p-8 flex flex-col items-center justify-center max-w-lg mx-auto w-full">
         
         {isOffline && (
-          <div className="w-full max-w-md mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start">
-            <WifiOff className="w-5 h-5 text-yellow-600 mr-3 mt-0.5" />
+          <div className="w-full mb-6 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/50 rounded-2xl p-4 flex items-start shadow-xs animate-in fade-in slide-in-from-top-2">
+            <WifiOff className="w-5 h-5 text-yellow-600 dark:text-yellow-400 mr-3 mt-0.5 shrink-0" />
             <div>
-              <h3 className="text-sm font-medium text-yellow-800">Mode Offline Aktif</h3>
-              <p className="text-xs text-yellow-700 mt-1">Koneksi internet terputus. Anda tetap dapat melakukan absensi dan data akan disimpan lokal, lalu disinkronisasi otomatis saat terhubung kembali.</p>
+              <h3 className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">{t.offlineMode}</h3>
+              <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1 leading-relaxed">{t.offlineDesc}</p>
             </div>
           </div>
         )}
 
-        <div className="w-full max-w-md bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-6 text-center">Rekam Kehadiran Anda</h2>
+        <div className="w-full bg-white dark:bg-gray-900 rounded-3xl shadow-xs border border-gray-200/80 dark:border-gray-800 overflow-hidden animate-in fade-in duration-300">
+          <div className="p-6 sm:p-8">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 text-center tracking-tight">
+              {t.recordAttendance}
+            </h2>
 
             {!location && (
-              <div className="text-center">
-                <div className="bg-blue-50 text-blue-800 p-4 rounded-lg mb-6 text-sm">
-                  Untuk mencegah kecurangan (Fake GPS), kami memerlukan akses lokasi Anda dengan akurasi tinggi.
+              <div className="text-center animate-in fade-in">
+                <div className="bg-blue-50/60 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800/50 text-blue-800 dark:text-blue-200 p-5 rounded-2xl mb-6 text-xs sm:text-sm leading-relaxed">
+                  {t.locWarning}
                 </div>
                 <button
                   onClick={getLocation}
                   disabled={locating}
-                  className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none disabled:opacity-50 transition-all"
+                  className="w-full flex items-center justify-center py-3.5 px-4 rounded-xl shadow-xs text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:outline-hidden disabled:opacity-50 transition-all"
                 >
-                  <MapPin className="w-5 h-5 mr-2" />
-                  {locating ? 'Mendapatkan Lokasi...' : 'Dapatkan Lokasi Saya'}
+                  <MapPin className="w-4 h-4 mr-2" />
+                  {locating ? t.processing : t.getLocation}
                 </button>
-                {locationError && <p className="mt-3 text-sm text-red-600">{locationError}</p>}
+                {locationError && (
+                  <p className="mt-3 text-xs font-semibold text-red-600 dark:text-red-400">
+                    {locationError}
+                  </p>
+                )}
               </div>
             )}
 
             {location && !scanning && attendanceStatus === 'idle' && (
-              <div className="text-center animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="bg-green-50 text-green-800 p-4 rounded-lg mb-6 flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 mr-2" />
-                  <span className="text-sm font-medium">Lokasi Terverifikasi</span>
+              <div className="text-center animate-in fade-in duration-300">
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300 p-4 rounded-2xl mb-6 flex items-center justify-center">
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  <span className="text-sm font-semibold">{t.locVerified}</span>
                 </div>
                 <button
                   onClick={() => setScanning(true)}
-                  className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none transition-all"
+                  className="w-full flex items-center justify-center py-3.5 px-4 rounded-xl shadow-xs text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-all"
                 >
-                  <Scan className="w-5 h-5 mr-2" />
-                  Scan QR Code Absensi
+                  <Scan className="w-4 h-4 mr-2" />
+                  {t.scanQR}
                 </button>
               </div>
             )}
 
             {scanning && (
-              <div className="space-y-4">
-                <div className="w-full overflow-hidden rounded-xl border-2 border-dashed border-gray-300">
+              <div className="space-y-4 animate-in fade-in duration-200">
+                <div className="w-full overflow-hidden rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-black aspect-square">
                   <Scanner
                     onScan={(result) => {
                       if (result && result.length > 0) {
@@ -234,7 +274,7 @@ export default function TeacherDashboard() {
                       }
                     }}
                     onError={(error: any) => {
-                      toast.error('Gagal mengakses kamera: ' + error.message);
+                      toast.error(t.cameraError + (error?.message || ''));
                     }}
                     components={{
                       audio: false,
@@ -244,44 +284,48 @@ export default function TeacherDashboard() {
                 </div>
                 <button
                   onClick={() => setScanning(false)}
-                  className="w-full py-2 px-4 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="w-full py-2.5 px-4 border border-gray-200 dark:border-gray-700 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                 >
-                  Batal
+                  {t.cancelScan}
                 </button>
               </div>
             )}
 
             {attendanceStatus === 'success' && (
-              <div className="text-center py-6 animate-in zoom-in duration-300">
-                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle className="w-8 h-8 text-green-600" />
+              <div className="text-center py-6 animate-in zoom-in-95 duration-300">
+                <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-emerald-200 dark:border-emerald-800">
+                  <CheckCircle className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Berhasil!</h3>
-                <p className="text-sm text-gray-600 mb-6">{statusMessage}</p>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{t.success}</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 leading-relaxed max-w-[280px] mx-auto">
+                  {statusMessage}
+                </p>
                 <button
                   onClick={() => setAttendanceStatus('idle')}
-                  className="py-2 px-6 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="py-2.5 px-6 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-xl text-xs font-semibold hover:bg-gray-800 dark:hover:bg-white transition-all shadow-xs"
                 >
-                  Kembali
+                  {t.done}
                 </button>
               </div>
             )}
 
             {attendanceStatus === 'error' && (
-              <div className="text-center py-6 animate-in zoom-in duration-300">
-                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <AlertCircle className="w-8 h-8 text-red-600" />
+              <div className="text-center py-6 animate-in zoom-in-95 duration-300">
+                <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-red-200 dark:border-red-800">
+                  <AlertCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Gagal</h3>
-                <p className="text-sm text-gray-600 mb-6">{statusMessage}</p>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{t.failed}</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 leading-relaxed max-w-[280px] mx-auto">
+                  {statusMessage}
+                </p>
                 <button
                   onClick={() => {
                     setAttendanceStatus('idle');
                     setScanning(true);
                   }}
-                  className="py-2 px-6 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+                  className="py-2.5 px-6 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-xs"
                 >
-                  Coba Scan Lagi
+                  {t.tryAgain}
                 </button>
               </div>
             )}
