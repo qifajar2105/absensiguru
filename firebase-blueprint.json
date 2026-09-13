@@ -1,94 +1,34 @@
 {
-  "entities": {
-    "User": {
-      "title": "User",
-      "description": "User account profile with role and school affiliation",
-      "type": "object",
-      "properties": {
-        "uid": { "type": "string" },
-        "email": { "type": "string" },
-        "name": { "type": "string" },
-        "role": { "type": "string", "enum": ["teacher", "admin", "superadmin"] },
-        "schoolCode": { "type": "string" },
-        "createdAt": { "type": "string" }
-      },
-      "required": ["uid", "email", "name", "role"]
-    },
-    "License": {
-      "title": "License",
-      "description": "School license code entity managed by Super Admin",
-      "type": "object",
-      "properties": {
-        "code": { "type": "string" },
-        "name": { "type": "string" },
-        "city": { "type": "string" },
-        "contactEmail": { "type": "string" },
-        "active": { "type": "boolean" },
-        "maxTeachers": { "type": "number" },
-        "validUntil": { "type": "string" },
-        "createdAt": { "type": "string" }
-      },
-      "required": ["code", "name", "active"]
-    },
-    "Attendance": {
-      "title": "Attendance",
-      "description": "Teacher attendance log records",
-      "type": "object",
-      "properties": {
-        "teacherId": { "type": "string" },
-        "teacherName": { "type": "string" },
-        "date": { "type": "string" },
-        "timestamp": { "type": "string" },
-        "status": { "type": "string" },
-        "location": { "type": "object" },
-        "distanceFromSchool": { "type": "number" }
-      },
-      "required": ["teacherId", "teacherName", "date", "status"]
-    },
-    "SchoolSettings": {
-      "title": "SchoolSettings",
-      "description": "School location coordinates and geofencing radius",
-      "type": "object",
-      "properties": {
-        "location": { "type": "object" },
-        "radius": { "type": "number" }
+  "collections": [
+    {
+      "name": "users",
+      "fields": {
+        "uid": "string",
+        "email": "string",
+        "name": "string",
+        "role": "string",
+        "createdAt": "timestamp"
       }
     },
-    "SuperAdminWhitelist": {
-      "title": "SuperAdminWhitelist",
-      "description": "Authorized Super Admin email whitelist",
-      "type": "object",
-      "properties": {
-        "email": { "type": "string" },
-        "name": { "type": "string" },
-        "notes": { "type": "string" },
-        "addedBy": { "type": "string" },
-        "addedAt": { "type": "string" },
-        "status": { "type": "string", "enum": ["active", "revoked"] }
-      },
-      "required": ["email", "addedBy", "addedAt"]
+    {
+      "name": "attendance",
+      "fields": {
+        "teacherId": "string",
+        "teacherName": "string",
+        "date": "string",
+        "timestamp": "timestamp",
+        "status": "string",
+        "location": "map",
+        "distanceFromSchool": "number"
+      }
+    },
+    {
+      "name": "school_settings",
+      "fields": {
+        "id": "string",
+        "location": "map",
+        "radius": "number"
+      }
     }
-  },
-  "firestore": {
-    "/super_admins/{adminEmail}": {
-      "schema": "SuperAdminWhitelist",
-      "description": "Whitelist of authorized super administrators"
-    },
-    "/users/{userId}": {
-      "schema": "User",
-      "description": "Registered users collection"
-    },
-    "/licenses/{licenseId}": {
-      "schema": "License",
-      "description": "School licenses collection"
-    },
-    "/attendance/{attendanceId}": {
-      "schema": "Attendance",
-      "description": "Attendance log records collection"
-    },
-    "/school_settings/{settingId}": {
-      "schema": "SchoolSettings",
-      "description": "School GPS and radius settings collection"
-    }
-  }
+  ]
 }

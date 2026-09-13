@@ -1,6 +1,6 @@
 {
-  "name": "Remix absen guru",
-  "description": "Sistem Presensi Guru terintegrasi GPS & QR Code dilengkapi Panel Super Admin dan Manajemen Lisensi Sekolah by Muhammad Fajar, S.Pd",
+  "name": "Sistem Absensi Guru",
+  "description": "Aplikasi absen guru dibuat dengan penuh cinta oleh Muhammad Fajar, S.Pd",
   "requestFramePermissions": [
     "camera",
     "geolocation"

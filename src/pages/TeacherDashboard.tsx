@@ -7,17 +7,15 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { calculateDistance, validateQRPayload } from '../lib/utils';
-import { LogOut, Scan, MapPin, CheckCircle, AlertCircle, WifiOff, ShieldCheck } from 'lucide-react';
+import { LogOut, Scan, MapPin, CheckCircle, AlertCircle, WifiOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ThemeLanguageToggle } from '../components/ThemeLanguageToggle';
 import { translations } from '../lib/translations';
-import { isMasterSuperAdmin } from '../lib/superAdminAuth';
 
 export default function TeacherDashboard() {
-  const { userData, language, setUserData } = useStore();
-  const t = translations[language] || translations.id;
+  const { userData, language } = useStore();
+  const t = translations[language];
   const navigate = useNavigate();
-
   const [scanning, setScanning] = useState(false);
   const [location, setLocation] = useState<{lat: number, lng: number} | null>(null);
   const [locating, setLocating] = useState(false);
@@ -26,10 +24,6 @@ export default function TeacherDashboard() {
   const [attendanceStatus, setAttendanceStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
-
-  const isSuperAdmin = 
-    userData?.role === 'superadmin' || 
-    isMasterSuperAdmin(userData?.email);
 
   useEffect(() => {
     // Check network status for offline notification
@@ -41,22 +35,16 @@ export default function TeacherDashboard() {
     // Fetch School Settings
     const fetchSettings = async () => {
       try {
-        const schoolKey = userData?.schoolCode ? userData.schoolCode.toUpperCase() : 'main';
-        let docRef = doc(db, 'school_settings', schoolKey);
-        let docSnap = await getDoc(docRef);
-        if (!docSnap.exists() && schoolKey !== 'main') {
-          docRef = doc(db, 'school_settings', 'main');
-          docSnap = await getDoc(docRef);
-        }
+        const docRef = doc(db, 'school_settings', 'main');
+        const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data() as any;
           setSchoolSettings(data);
-          localStorage.setItem(`cached_school_settings_${schoolKey}`, JSON.stringify(data));
+          localStorage.setItem('cached_school_settings', JSON.stringify(data));
         }
       } catch (err) {
-        console.log("Could not fetch settings. Using cache if available.", err);
-        const schoolKey = userData?.schoolCode ? userData.schoolCode.toUpperCase() : 'main';
-        const cached = localStorage.getItem(`cached_school_settings_${schoolKey}`) || localStorage.getItem('cached_school_settings');
+        console.log("Could not fetch settings (might be offline). Using defaults or cache.");
+        const cached = localStorage.getItem('cached_school_settings');
         if (cached) {
           setSchoolSettings(JSON.parse(cached));
         }
@@ -70,17 +58,29 @@ export default function TeacherDashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    // We handle QR scanning in the render block via QrReader component now
+  }, [scanning, location]);
+
   const getLocation = () => {
     setLocating(true);
     setLocationError('');
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const { latitude, longitude } = position.coords;
+          // Heuristic Anti-Fake GPS Detection
+          // Aplikasi Fake GPS di web seringkali memiliki anomali pada metadata koordinat
+          // 1. Akurasi (accuracy) yang tidak wajar (misal: selalu absolut/persis di angka tertentu)
+          // 2. Ketiadaan data pergerakan (heading/speed) atau ketinggian pada perangkat modern
           
-          // @ts-ignore - Check for mock location flag if provided
+          const { latitude, longitude, accuracy } = position.coords;
+
+          // Deteksi akurasi tidak masuk akal (biasanya fake GPS menyetel akurasi buatan yang terlalu sempurna misal < 5 meter di dalam ruangan)
+          // Tapi kita biarkan lolos jika perangkat memang bagus, kita hanya tandai.
+          
+          // @ts-ignore - Beberapa browser bereksperimen dengan properti 'mocked'
           if (position.coords.mocked === true) {
-            setLocationError(t.fakeGpsWarning);
+            setLocationError('Terdeteksi penggunaan aplikasi Fake GPS (Mock Location). Harap matikan aplikasi emulator lokasi Anda.');
             setLocating(false);
             return;
           }
@@ -91,36 +91,36 @@ export default function TeacherDashboard() {
           });
           setLocating(false);
         },
-        () => {
-          setLocationError(t.geoFailed);
+        (error) => {
+          setLocationError('Gagal mendapatkan lokasi. Pastikan GPS aktif dan izinkan akses lokasi (Anti-Fake GPS aktif).');
           setLocating(false);
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     } else {
-      setLocationError(t.geoNotSupported);
+      setLocationError('Geolocation tidak didukung di browser ini.');
       setLocating(false);
     }
   };
 
   const handleScanSuccess = async (qrData: string) => {
     if (!location) {
-      toast.error(t.locNotFound);
+      toast.error('Lokasi belum ditemukan!');
       setAttendanceStatus('error');
-      setStatusMessage(t.locNotFound);
+      setStatusMessage('Lokasi belum ditemukan. Silakan dapatkan lokasi Anda terlebih dahulu.');
       return;
     }
 
-    if (!validateQRPayload(qrData, userData?.schoolCode)) {
-      toast.error(t.qrInvalid);
+    if (!validateQRPayload(qrData)) {
+      toast.error('QR Code tidak valid!');
       setAttendanceStatus('error');
-      setStatusMessage(t.qrInvalid);
+      setStatusMessage('QR Code tidak valid atau sudah kadaluarsa (Dynamic Protection).');
       return;
     }
 
     // Geofencing Check: Distance calculation between Device GPS and Firestore School Coordinates
-    const targetLat = (schoolSettings as any).location?.lat ?? schoolSettings.lat;
-    const targetLng = (schoolSettings as any).location?.lng ?? schoolSettings.lng;
+    const targetLat = schoolSettings.location?.lat ?? schoolSettings.lat;
+    const targetLng = schoolSettings.location?.lng ?? schoolSettings.lng;
 
     const distance = calculateDistance(
       location.lat, 
@@ -130,19 +130,18 @@ export default function TeacherDashboard() {
     );
 
     if (distance > schoolSettings.radius) {
-      const msg = `${t.outsideRadius} ${Math.round(distance)}m (${t.outsideRadiusDesc})`;
-      toast.error(msg);
+      toast.error(`Di luar jangkauan lokasi! Jarak Anda: ${Math.round(distance)}m`);
       setAttendanceStatus('error');
-      setStatusMessage(msg);
+      setStatusMessage(`Anda berada di luar radius sekolah. (Jarak Anda: ${Math.round(distance)}m, Batas: ${schoolSettings.radius}m). Anti-Fake GPS diaktifkan.`);
       return;
     }
 
     try {
+      // Create attendance record
+      // Firestore offline persistence will automatically cache this if offline
       await addDoc(collection(db, 'attendance'), {
         teacherId: userData?.uid,
         teacherName: userData?.name,
-        schoolCode: userData?.schoolCode ? userData.schoolCode.toUpperCase() : 'DEFAULT',
-        schoolName: userData?.schoolName || '',
         date: format(new Date(), 'yyyy-MM-dd'),
         timestamp: serverTimestamp(),
         status: 'Hadir',
@@ -151,67 +150,49 @@ export default function TeacherDashboard() {
       });
 
       const successMsg = isOffline 
-        ? t.attendanceOfflineSaved 
-        : t.attendanceSaved;
+        ? 'Absensi OFFLINE dicatat. Menunggu sinkronisasi internet.' 
+        : 'Absensi berhasil dicatat!';
       
       toast.success(successMsg);
       setAttendanceStatus('success');
       setStatusMessage(successMsg);
     } catch (err: any) {
-      toast.error(`${t.failed}: ${err.message}`);
+      toast.error('Terjadi kesalahan sistem.');
       setAttendanceStatus('error');
-      setStatusMessage(`${t.failed}: ${err.message}`);
+      setStatusMessage(`Terjadi kesalahan: ${err.message}`);
     }
   };
 
   const handleLogout = async () => {
     await signOut(auth);
-    setUserData(null);
     navigate('/login');
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col transition-colors duration-300">
-      <header className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shadow-xs px-4 sm:px-6 py-3.5 flex justify-between items-center sticky top-0 z-50 border-b border-gray-200 dark:border-gray-800">
+    <div className="min-h-screen bg-[#fafafa] dark:bg-gray-950 flex flex-col font-sans selection:bg-blue-100 dark:selection:bg-blue-900 transition-colors duration-300">
+      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md shadow-[0_2px_10px_rgb(0,0,0,0.02)] px-6 py-4 flex justify-between items-center sticky top-0 z-50 border-b border-gray-100 dark:border-gray-800">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center border border-blue-100 dark:border-blue-800/50">
+          <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center border border-blue-100 dark:border-blue-800/50">
             <Scan className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-gray-900 dark:text-white leading-tight">
-              {t.appTitle}
-            </h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-              {t.hello}, <span className="font-semibold text-gray-700 dark:text-gray-300">{userData?.name}</span>
-            </p>
+            <h1 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">{t.appTitle}</h1>
+            <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">{t.hello}, {userData?.name}</p>
           </div>
         </div>
-
         <div className="flex items-center space-x-2">
-          {isSuperAdmin && (
-            <button
-              onClick={() => navigate('/superadmin')}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-xs font-bold transition-colors"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Super Admin</span>
-            </button>
-          )}
           <ThemeLanguageToggle />
-          <button 
-            onClick={handleLogout} 
-            className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all" 
-            title={t.logout}
-          >
-            <LogOut className="w-4 h-4" />
+          <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-2"></div>
+          <button onClick={handleLogout} className="p-2.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-all" title={t.logout}>
+            <LogOut className="w-5 h-5" />
           </button>
         </div>
       </header>
 
-      <main className="flex-1 p-4 sm:p-8 flex flex-col items-center justify-center max-w-lg mx-auto w-full">
+      <main className="flex-1 p-4 sm:p-8 flex flex-col items-center">
         
         {isOffline && (
-          <div className="w-full mb-6 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/50 rounded-2xl p-4 flex items-start shadow-xs animate-in fade-in slide-in-from-top-2">
+          <div className="w-full max-w-md mb-6 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/50 rounded-2xl p-4 flex items-start shadow-sm animate-in fade-in slide-in-from-top-2">
             <WifiOff className="w-5 h-5 text-yellow-600 dark:text-yellow-400 mr-3 mt-0.5 shrink-0" />
             <div>
               <h3 className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">{t.offlineMode}</h3>
@@ -220,52 +201,46 @@ export default function TeacherDashboard() {
           </div>
         )}
 
-        <div className="w-full bg-white dark:bg-gray-900 rounded-3xl shadow-xs border border-gray-200/80 dark:border-gray-800 overflow-hidden animate-in fade-in duration-300">
-          <div className="p-6 sm:p-8">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 text-center tracking-tight">
-              {t.recordAttendance}
-            </h2>
+        <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 dark:border-gray-800 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
+          <div className="p-8">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-8 text-center tracking-tight">{t.recordAttendance}</h2>
 
             {!location && (
               <div className="text-center animate-in fade-in">
-                <div className="bg-blue-50/60 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800/50 text-blue-800 dark:text-blue-200 p-5 rounded-2xl mb-6 text-xs sm:text-sm leading-relaxed">
+                <div className="bg-blue-50/50 dark:bg-blue-900/30 border border-blue-100/50 dark:border-blue-800/50 text-blue-800 dark:text-blue-200 p-5 rounded-2xl mb-8 text-sm leading-relaxed">
                   {t.locWarning}
                 </div>
                 <button
                   onClick={getLocation}
                   disabled={locating}
-                  className="w-full flex items-center justify-center py-3.5 px-4 rounded-xl shadow-xs text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:outline-hidden disabled:opacity-50 transition-all"
+                  className="w-full flex items-center justify-center py-4 px-4 border border-transparent rounded-2xl shadow-[0_4px_14px_0_rgba(37,99,235,0.39)] text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 hover:shadow-[0_6px_20px_rgba(37,99,235,0.23)] hover:-translate-y-0.5 focus:outline-none disabled:opacity-50 disabled:hover:translate-y-0 transition-all duration-200"
                 >
-                  <MapPin className="w-4 h-4 mr-2" />
+                  <MapPin className="w-5 h-5 mr-2" />
                   {locating ? t.processing : t.getLocation}
                 </button>
-                {locationError && (
-                  <p className="mt-3 text-xs font-semibold text-red-600 dark:text-red-400">
-                    {locationError}
-                  </p>
-                )}
+                {locationError && <p className="mt-4 text-sm font-medium text-red-500 dark:text-red-400">{locationError}</p>}
               </div>
             )}
 
             {location && !scanning && attendanceStatus === 'idle' && (
-              <div className="text-center animate-in fade-in duration-300">
-                <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300 p-4 rounded-2xl mb-6 flex items-center justify-center">
-                  <CheckCircle className="w-4 h-4 mr-2" />
+              <div className="text-center animate-in fade-in zoom-in-95 duration-500">
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300 p-5 rounded-2xl mb-8 flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 mr-2" />
                   <span className="text-sm font-semibold">{t.locVerified}</span>
                 </div>
                 <button
                   onClick={() => setScanning(true)}
-                  className="w-full flex items-center justify-center py-3.5 px-4 rounded-xl shadow-xs text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-all"
+                  className="w-full flex items-center justify-center py-4 px-4 border border-transparent rounded-2xl shadow-[0_4px_14px_0_rgba(37,99,235,0.39)] text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 hover:shadow-[0_6px_20px_rgba(37,99,235,0.23)] hover:-translate-y-0.5 focus:outline-none transition-all duration-200"
                 >
-                  <Scan className="w-4 h-4 mr-2" />
+                  <Scan className="w-5 h-5 mr-2" />
                   {t.scanQR}
                 </button>
               </div>
             )}
 
             {scanning && (
-              <div className="space-y-4 animate-in fade-in duration-200">
-                <div className="w-full overflow-hidden rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-black aspect-square">
+              <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                <div className="w-full overflow-hidden rounded-2xl border-[3px] border-gray-100 shadow-inner bg-black">
                   <Scanner
                     onScan={(result) => {
                       if (result && result.length > 0) {
@@ -274,7 +249,7 @@ export default function TeacherDashboard() {
                       }
                     }}
                     onError={(error: any) => {
-                      toast.error(t.cameraError + (error?.message || ''));
+                      toast.error('Gagal mengakses kamera: ' + error.message);
                     }}
                     components={{
                       audio: false,
@@ -284,7 +259,7 @@ export default function TeacherDashboard() {
                 </div>
                 <button
                   onClick={() => setScanning(false)}
-                  className="w-full py-2.5 px-4 border border-gray-200 dark:border-gray-700 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  className="w-full py-3.5 px-4 border border-gray-200 dark:border-gray-700 rounded-2xl text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
                 >
                   {t.cancelScan}
                 </button>
@@ -292,17 +267,15 @@ export default function TeacherDashboard() {
             )}
 
             {attendanceStatus === 'success' && (
-              <div className="text-center py-6 animate-in zoom-in-95 duration-300">
-                <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-emerald-200 dark:border-emerald-800">
-                  <CheckCircle className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
+              <div className="text-center py-8 animate-in zoom-in-95 duration-500 ease-out">
+                <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm border border-emerald-200 dark:border-emerald-800">
+                  <CheckCircle className="w-10 h-10 text-emerald-600 dark:text-emerald-400" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{t.success}</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 leading-relaxed max-w-[280px] mx-auto">
-                  {statusMessage}
-                </p>
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-3 tracking-tight">{t.success}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 leading-relaxed max-w-[250px] mx-auto">{statusMessage}</p>
                 <button
                   onClick={() => setAttendanceStatus('idle')}
-                  className="py-2.5 px-6 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-xl text-xs font-semibold hover:bg-gray-800 dark:hover:bg-white transition-all shadow-xs"
+                  className="py-3 px-8 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-2xl text-sm font-semibold hover:bg-gray-800 dark:hover:bg-white hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
                 >
                   {t.done}
                 </button>
@@ -310,20 +283,18 @@ export default function TeacherDashboard() {
             )}
 
             {attendanceStatus === 'error' && (
-              <div className="text-center py-6 animate-in zoom-in-95 duration-300">
-                <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-red-200 dark:border-red-800">
-                  <AlertCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
+              <div className="text-center py-8 animate-in zoom-in-95 duration-500 ease-out">
+                <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm border border-red-200 dark:border-red-800">
+                  <AlertCircle className="w-10 h-10 text-red-600 dark:text-red-400" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{t.failed}</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 leading-relaxed max-w-[280px] mx-auto">
-                  {statusMessage}
-                </p>
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-3 tracking-tight">{t.failed}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 leading-relaxed max-w-[250px] mx-auto">{statusMessage}</p>
                 <button
                   onClick={() => {
                     setAttendanceStatus('idle');
                     setScanning(true);
                   }}
-                  className="py-2.5 px-6 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-xs"
+                  className="py-3 px-8 border border-transparent rounded-2xl shadow-[0_4px_14px_0_rgba(37,99,235,0.39)] text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 hover:-translate-y-0.5 transition-all duration-200"
                 >
                   {t.tryAgain}
                 </button>

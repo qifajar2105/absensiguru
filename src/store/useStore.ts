@@ -11,8 +11,6 @@ export interface UserData {
   name: string;
   role: UserRole;
   schoolCode?: string;
-  schoolName?: string;
-  createdAt?: any;
 }
 
 interface AuthState {
@@ -28,18 +26,11 @@ interface AuthState {
   setLanguage: (lang: Language) => void;
 }
 
-const initialTheme = (localStorage.getItem('theme') as Theme) || 'light';
-if (initialTheme === 'dark') {
-  document.documentElement.classList.add('dark');
-} else {
-  document.documentElement.classList.remove('dark');
-}
-
 export const useStore = create<AuthState>((set) => ({
   user: null,
   userData: null,
   loading: true,
-  theme: initialTheme,
+  theme: (localStorage.getItem('theme') as Theme) || 'light',
   language: (localStorage.getItem('language') as Language) || 'id',
   setUser: (user) => set({ user }),
   setUserData: (userData) => set({ userData }),

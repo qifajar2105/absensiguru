@@ -5,12 +5,11 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from './lib/firebase';
 import { useStore, UserData } from './store/useStore';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Toaster } from 'react-hot-toast';
-import { checkIsSuperAdmin, isMasterSuperAdmin } from './lib/superAdminAuth';
 
 import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
@@ -25,41 +24,19 @@ export default function App() {
       setUser(firebaseUser);
       if (firebaseUser) {
         try {
-          const isAuthorizedSuperAdmin = await checkIsSuperAdmin(firebaseUser.email);
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             const data = userDoc.data() as UserData;
-            if (isAuthorizedSuperAdmin && data.role !== 'superadmin') {
-              data.role = 'superadmin';
-              await setDoc(doc(db, 'users', firebaseUser.uid), { role: 'superadmin' }, { merge: true });
-            } else if (!isAuthorizedSuperAdmin && data.role === 'superadmin') {
-              // Sanitize if unwhitelisted
-              data.role = 'teacher';
-              await setDoc(doc(db, 'users', firebaseUser.uid), { role: 'teacher' }, { merge: true });
-            }
             setUserData(data);
             localStorage.setItem('cached_user_data', JSON.stringify(data));
           } else {
-            if (isAuthorizedSuperAdmin) {
-              const superAdminData: UserData = {
-                uid: firebaseUser.uid,
-                email: firebaseUser.email || '',
-                name: firebaseUser.displayName || (isMasterSuperAdmin(firebaseUser.email) ? 'Muhammad Fajar, S.Pd' : 'Super Admin'),
-                role: 'superadmin',
-                schoolCode: 'SUPERADMIN',
-                createdAt: new Date().toISOString()
-              };
-              await setDoc(doc(db, 'users', firebaseUser.uid), superAdminData);
-              setUserData(superAdminData);
-              localStorage.setItem('cached_user_data', JSON.stringify(superAdminData));
-            } else {
-              setUserData(null);
-              localStorage.removeItem('cached_user_data');
-            }
+            setUserData(null);
+            localStorage.removeItem('cached_user_data');
           }
         } catch (error: any) {
+          // Fallback to local storage if offline
           if (error.code === 'unavailable' || error.message?.includes('offline')) {
-            console.warn("Could not fetch user data (offline mode). Using cached data.");
+            console.warn("Could not fetch user data from server (offline). Using cached data.");
             const cached = localStorage.getItem('cached_user_data');
             if (cached) {
               setUserData(JSON.parse(cached));
@@ -90,7 +67,7 @@ export default function App() {
         <Route 
           path="/admin/*" 
           element={
-            <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+            <ProtectedRoute allowedRoles={['admin']}>
               <AdminDashboard />
             </ProtectedRoute>
           } 
@@ -99,7 +76,7 @@ export default function App() {
         <Route 
           path="/superadmin/*" 
           element={
-            <ProtectedRoute allowedRoles={['superadmin']}>
+            <ProtectedRoute allowedRoles={['admin', 'teacher', 'superadmin']}>
               <SuperAdminDashboard />
             </ProtectedRoute>
           } 
@@ -108,7 +85,7 @@ export default function App() {
         <Route 
           path="/teacher/*" 
           element={
-            <ProtectedRoute allowedRoles={['teacher', 'superadmin']}>
+            <ProtectedRoute allowedRoles={['teacher']}>
               <TeacherDashboard />
             </ProtectedRoute>
           } 
