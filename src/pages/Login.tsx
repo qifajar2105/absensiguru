@@ -62,8 +62,8 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center text-blue-600">
-          <LogIn className="w-12 h-12" />
+        <div className="flex justify-center">
+          <img src="/logo.jpg" alt="Logo Absensi Guru" className="w-24 h-24 rounded-2xl shadow-sm object-cover" />
         </div>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
           Sistem Absensi Guru
@@ -129,6 +129,13 @@ export default function Login() {
           )}
 
         </div>
+      </div>
+      
+      {/* Footer / Credit */}
+      <div className="mt-8 text-center">
+        <p className="text-sm text-gray-500 font-medium">
+          Dibuat oleh <span className="text-blue-600">Muhammad Fajar, S.Pd</span>
+        </p>
       </div>
     </div>
   );

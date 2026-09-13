@@ -3,12 +3,13 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore, enableMultiTabIndexedDbPersistence } from 'firebase/firestore';
 
 const firebaseConfig = {
-  projectId: "academic-hub-zgtt6",
-  appId: "1:513506346004:web:33cfd930b8ea0ed64bd301",
-  apiKey: "AIzaSyAHECLdN5vXTovbn6UTR0jbD5Rq9QsqPSg",
-  authDomain: "academic-hub-zgtt6.firebaseapp.com",
-  storageBucket: "academic-hub-zgtt6.firebasestorage.app",
-  messagingSenderId: "513506346004"
+  apiKey: "AIzaSyA3XVAZo_vxALSHlbJgRWEl5UDe8LidaCw",
+  authDomain: "absensi-guru-133d8.firebaseapp.com",
+  projectId: "absensi-guru-133d8",
+  storageBucket: "absensi-guru-133d8.firebasestorage.app",
+  messagingSenderId: "515627034437",
+  appId: "1:515627034437:web:9ce106a6ca0878173d802c",
+  measurementId: "G-PT2ZLT00LY"
 };
 
 const app = initializeApp(firebaseConfig);
