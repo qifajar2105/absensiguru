@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { useNavigate } from 'react-router-dom';
 import { LogIn } from 'lucide-react';
+import { useStore } from '../store/useStore';
 
 export default function Login() {
   const [error, setError] = useState('');
@@ -12,6 +13,14 @@ export default function Login() {
   const [tempUser, setTempUser] = useState<any>(null);
   const [selectedRole, setSelectedRole] = useState<'admin' | 'teacher'>('teacher');
   const navigate = useNavigate();
+  const { userData, setUserData } = useStore();
+
+  // Auto redirect if already logged in
+  useEffect(() => {
+    if (userData) {
+      navigate(userData.role === 'admin' ? '/admin' : '/teacher');
+    }
+  }, [userData, navigate]);
 
   const handleGoogleLogin = async () => {
     setError('');
@@ -24,8 +33,9 @@ export default function Login() {
 
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       if (userDoc.exists()) {
-        const userData = userDoc.data();
-        navigate(userData.role === 'admin' ? '/admin' : '/teacher');
+        const data = userDoc.data() as any;
+        setUserData(data);
+        navigate(data.role === 'admin' ? '/admin' : '/teacher');
       } else {
         setTempUser(user);
         setNeedsRole(true);
@@ -44,13 +54,17 @@ export default function Login() {
     setLoading(true);
     setError('');
     try {
-      await setDoc(doc(db, 'users', tempUser.uid), {
+      const newUserData = {
         uid: tempUser.uid,
         email: tempUser.email,
         name: tempUser.displayName || 'Pengguna Baru',
         role: selectedRole,
-        createdAt: new Date()
-      });
+        createdAt: new Date().toISOString()
+      };
+      
+      await setDoc(doc(db, 'users', tempUser.uid), newUserData);
+      setUserData(newUserData as any);
+      
       navigate(selectedRole === 'admin' ? '/admin' : '/teacher');
     } catch (err: any) {
       setError(err.message || 'Gagal menyimpan data akun.');
