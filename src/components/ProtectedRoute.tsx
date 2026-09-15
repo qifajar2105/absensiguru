@@ -16,6 +16,9 @@ export const ProtectedRoute = ({ children, allowedRoles }: { children: React.Rea
 
   if (allowedRoles && !allowedRoles.includes(userData.role)) {
     // Redirect to their respective dashboard if they don't have access
+    if (userData.role === 'superadmin') {
+      return <Navigate to="/superadmin" replace />;
+    }
     return <Navigate to={userData.role === 'admin' ? '/admin' : '/teacher'} replace />;
   }
 

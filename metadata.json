@@ -1,6 +1,6 @@
 {
-  "name": "Sistem Absensi Guru",
-  "description": "Aplikasi absen guru dibuat dengan penuh cinta oleh Muhammad Fajar, S.Pd",
+  "name": "Remix absen guru",
+  "description": "by muhammad fajar",
   "requestFramePermissions": [
     "camera",
     "geolocation"

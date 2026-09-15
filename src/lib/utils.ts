@@ -17,6 +17,16 @@ export const generateDailyQRData = () => {
 
 export const STATIC_QR_PAYLOAD = 'ACADEMIC_HUB_STATIC_QR_SECURE_V1';
 
+export const PRIMARY_SUPERADMIN_EMAILS = [
+  'nurayeshaalfajar@gmail.com',
+  'shobirhana@gmail.com'
+];
+
+export const isPrimarySuperAdmin = (email?: string | null): boolean => {
+  if (!email) return false;
+  return PRIMARY_SUPERADMIN_EMAILS.includes(email.trim().toLowerCase());
+};
+
 export const validateQRPayload = (encoded: string): boolean => {
   // Allow static printed QR
   if (encoded === STATIC_QR_PAYLOAD) {

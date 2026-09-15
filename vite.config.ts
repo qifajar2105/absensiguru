@@ -13,9 +13,9 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
         manifest: {
-          name: 'Sistem Absensi Guru',
-          short_name: 'Absensi',
-          description: 'Aplikasi Absensi Guru Terintegrasi GPS',
+          name: 'Sistem Presensi Guru',
+          short_name: 'Presensi',
+          description: 'Aplikasi Presensi Guru Terintegrasi GPS',
           theme_color: '#ffffff',
           icons: [
             {

@@ -11,6 +11,7 @@ export interface UserData {
   name: string;
   role: UserRole;
   schoolCode?: string;
+  photoURL?: string;
 }
 
 interface AuthState {

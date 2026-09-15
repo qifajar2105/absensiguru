@@ -12,8 +12,10 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      // Hardcoded super admin for demo purposes
-      return isAuthenticated() && request.auth.token.email == 'shobirhana@gmail.com';
+      return isAuthenticated() && (
+        request.auth.token.email in ['nurayeshaalfajar@gmail.com', 'shobirhana@gmail.com'] ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin')
+      );
     }
 
     function isOwner(userId) {
@@ -39,6 +41,26 @@ service cloud.firestore {
     match /licenses/{docId} {
       allow read: if true; // Allows the login screen to check
       allow write: if isSuperAdmin();
+    }
+
+    match /superadmins/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+
+    match /subjects/{docId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    match /students/{docId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    match /student_attendance/{docId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
     }
   }
 }

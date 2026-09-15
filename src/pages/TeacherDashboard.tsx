@@ -1,309 +1,215 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
-import { db, auth } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { auth } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
-import { format } from 'date-fns';
-import { Scanner } from '@yudiel/react-qr-scanner';
-import { calculateDistance, validateQRPayload } from '../lib/utils';
-import { LogOut, Scan, MapPin, CheckCircle, AlertCircle, WifiOff } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { 
+  LogOut, 
+  Scan, 
+  Bell, 
+  BellOff, 
+  BookOpen, 
+  Users, 
+  CheckSquare, 
+  CalendarCheck,
+  Camera
+} from 'lucide-react';
 import { ThemeLanguageToggle } from '../components/ThemeLanguageToggle';
 import { translations } from '../lib/translations';
+import { usePushReminder } from '../hooks/usePushReminder';
+
+// Subcomponents
+import TeacherAttendanceView from '../components/teacher/TeacherAttendanceView';
+import TeacherSubjectsView from '../components/teacher/TeacherSubjectsView';
+import TeacherStudentsView from '../components/teacher/TeacherStudentsView';
+import TeacherStudentAttendanceView from '../components/teacher/TeacherStudentAttendanceView';
+import ProfilePhotoModal from '../components/teacher/ProfilePhotoModal';
 
 export default function TeacherDashboard() {
   const { userData, language } = useStore();
   const t = translations[language];
   const navigate = useNavigate();
-  const [scanning, setScanning] = useState(false);
-  const [location, setLocation] = useState<{lat: number, lng: number} | null>(null);
-  const [locating, setLocating] = useState(false);
-  const [locationError, setLocationError] = useState('');
-  const [schoolSettings, setSchoolSettings] = useState({ lat: -6.2, lng: 106.8, radius: 100 });
-  const [attendanceStatus, setAttendanceStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [statusMessage, setStatusMessage] = useState('');
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
-  useEffect(() => {
-    // Check network status for offline notification
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+  const [activeTab, setActiveTab] = useState<'attendance' | 'studentAttendance' | 'subjects' | 'students'>('attendance');
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
 
-    // Fetch School Settings
-    const fetchSettings = async () => {
-      try {
-        const docRef = doc(db, 'school_settings', 'main');
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data() as any;
-          setSchoolSettings(data);
-          localStorage.setItem('cached_school_settings', JSON.stringify(data));
-        }
-      } catch (err) {
-        console.log("Could not fetch settings (might be offline). Using defaults or cache.");
-        const cached = localStorage.getItem('cached_school_settings');
-        if (cached) {
-          setSchoolSettings(JSON.parse(cached));
-        }
-      }
-    };
-    fetchSettings();
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  useEffect(() => {
-    // We handle QR scanning in the render block via QrReader component now
-  }, [scanning, location]);
-
-  const getLocation = () => {
-    setLocating(true);
-    setLocationError('');
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          // Heuristic Anti-Fake GPS Detection
-          // Aplikasi Fake GPS di web seringkali memiliki anomali pada metadata koordinat
-          // 1. Akurasi (accuracy) yang tidak wajar (misal: selalu absolut/persis di angka tertentu)
-          // 2. Ketiadaan data pergerakan (heading/speed) atau ketinggian pada perangkat modern
-          
-          const { latitude, longitude, accuracy } = position.coords;
-
-          // Deteksi akurasi tidak masuk akal (biasanya fake GPS menyetel akurasi buatan yang terlalu sempurna misal < 5 meter di dalam ruangan)
-          // Tapi kita biarkan lolos jika perangkat memang bagus, kita hanya tandai.
-          
-          // @ts-ignore - Beberapa browser bereksperimen dengan properti 'mocked'
-          if (position.coords.mocked === true) {
-            setLocationError('Terdeteksi penggunaan aplikasi Fake GPS (Mock Location). Harap matikan aplikasi emulator lokasi Anda.');
-            setLocating(false);
-            return;
-          }
-
-          setLocation({
-            lat: latitude,
-            lng: longitude
-          });
-          setLocating(false);
-        },
-        (error) => {
-          setLocationError('Gagal mendapatkan lokasi. Pastikan GPS aktif dan izinkan akses lokasi (Anti-Fake GPS aktif).');
-          setLocating(false);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    } else {
-      setLocationError('Geolocation tidak didukung di browser ini.');
-      setLocating(false);
-    }
-  };
-
-  const handleScanSuccess = async (qrData: string) => {
-    if (!location) {
-      toast.error('Lokasi belum ditemukan!');
-      setAttendanceStatus('error');
-      setStatusMessage('Lokasi belum ditemukan. Silakan dapatkan lokasi Anda terlebih dahulu.');
-      return;
-    }
-
-    if (!validateQRPayload(qrData)) {
-      toast.error('QR Code tidak valid!');
-      setAttendanceStatus('error');
-      setStatusMessage('QR Code tidak valid atau sudah kadaluarsa (Dynamic Protection).');
-      return;
-    }
-
-    // Geofencing Check: Distance calculation between Device GPS and Firestore School Coordinates
-    const targetLat = schoolSettings.location?.lat ?? schoolSettings.lat;
-    const targetLng = schoolSettings.location?.lng ?? schoolSettings.lng;
-
-    const distance = calculateDistance(
-      location.lat, 
-      location.lng, 
-      targetLat, 
-      targetLng
-    );
-
-    if (distance > schoolSettings.radius) {
-      toast.error(`Di luar jangkauan lokasi! Jarak Anda: ${Math.round(distance)}m`);
-      setAttendanceStatus('error');
-      setStatusMessage(`Anda berada di luar radius sekolah. (Jarak Anda: ${Math.round(distance)}m, Batas: ${schoolSettings.radius}m). Anti-Fake GPS diaktifkan.`);
-      return;
-    }
-
-    try {
-      // Create attendance record
-      // Firestore offline persistence will automatically cache this if offline
-      await addDoc(collection(db, 'attendance'), {
-        teacherId: userData?.uid,
-        teacherName: userData?.name,
-        date: format(new Date(), 'yyyy-MM-dd'),
-        timestamp: serverTimestamp(),
-        status: 'Hadir',
-        location,
-        distanceFromSchool: distance
-      });
-
-      const successMsg = isOffline 
-        ? 'Absensi OFFLINE dicatat. Menunggu sinkronisasi internet.' 
-        : 'Absensi berhasil dicatat!';
-      
-      toast.success(successMsg);
-      setAttendanceStatus('success');
-      setStatusMessage(successMsg);
-    } catch (err: any) {
-      toast.error('Terjadi kesalahan sistem.');
-      setAttendanceStatus('error');
-      setStatusMessage(`Terjadi kesalahan: ${err.message}`);
-    }
-  };
+  const { permission, requestPermission } = usePushReminder(false, false);
 
   const handleLogout = async () => {
     await signOut(auth);
     navigate('/login');
   };
 
+  const currentPhoto = userData?.photoURL || auth.currentUser?.photoURL || '';
+  const teacherInitial = (userData?.name || 'G')[0].toUpperCase();
+
   return (
-    <div className="min-h-screen bg-[#fafafa] dark:bg-gray-950 flex flex-col font-sans selection:bg-blue-100 dark:selection:bg-blue-900 transition-colors duration-300">
-      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md shadow-[0_2px_10px_rgb(0,0,0,0.02)] px-6 py-4 flex justify-between items-center sticky top-0 z-50 border-b border-gray-100 dark:border-gray-800">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center border border-blue-100 dark:border-blue-800/50">
-            <Scan className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+    <div className="min-h-screen bg-gray-50/60 dark:bg-gray-950 flex flex-col font-sans selection:bg-blue-100 dark:selection:bg-blue-900 transition-colors duration-300">
+      {/* TOP HEADER */}
+      <header className="bg-white/85 dark:bg-gray-900/85 backdrop-blur-md shadow-[0_2px_10px_rgb(0,0,0,0.02)] px-4 sm:px-8 py-3.5 flex justify-between items-center sticky top-0 z-40 border-b border-gray-100 dark:border-gray-800">
+        <div className="flex items-center gap-3.5">
+          {/* FOTO PROFIL GURU DI KIRI ATAS */}
+          <div 
+            onClick={() => setIsPhotoModalOpen(true)}
+            className="relative group cursor-pointer shrink-0"
+            title="Klik untuk mengganti foto profil"
+          >
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl overflow-hidden bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-base shadow-sm ring-2 ring-blue-500/20 group-hover:ring-blue-500/60 transition-all">
+              {currentPhoto ? (
+                <img 
+                  src={currentPhoto} 
+                  alt={userData?.name || 'Foto Profil'} 
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span>{teacherInitial}</span>
+              )}
+            </div>
+            {/* Camera badge */}
+            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-600 hover:bg-blue-700 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white dark:border-gray-900 transition-transform group-hover:scale-110">
+              <Camera className="w-2.5 h-2.5" />
+            </div>
           </div>
+
           <div>
-            <h1 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">{t.appTitle}</h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">{t.hello}, {userData?.name}</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white leading-tight">
+                {userData?.name || t.appTitle}
+              </h1>
+              {userData?.schoolCode && (
+                <span className="hidden sm:inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
+                  {userData.schoolCode}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 font-medium mt-0.5">
+              <span>{userData?.email}</span>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => setIsPhotoModalOpen(true)}
+                className="text-blue-600 dark:text-blue-400 hover:underline font-semibold text-[11px] inline-flex items-center gap-1"
+              >
+                <Camera className="w-3 h-3" />
+                Ganti Foto
+              </button>
+            </div>
           </div>
         </div>
-        <div className="flex items-center space-x-2">
+
+        <div className="flex items-center space-x-1.5 sm:space-x-2">
+          {permission === 'granted' ? (
+            <button 
+              onClick={() => {
+                if (navigator.serviceWorker) {
+                  navigator.serviceWorker.ready.then(reg => {
+                    reg.showNotification('Uji Coba Pengingat', { body: 'Ini adalah tes notifikasi absensi.', icon: '/pwa-192x192.png' });
+                  }).catch(() => new Notification('Uji Coba Pengingat', { body: 'Ini adalah tes notifikasi absensi.' }));
+                } else {
+                  new Notification('Uji Coba Pengingat', { body: 'Ini adalah tes notifikasi absensi.' });
+                }
+              }} 
+              className="p-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-xl transition-all" 
+              title="Test Notifikasi Pengingat"
+            >
+              <Bell className="w-4 h-4" />
+            </button>
+          ) : (
+            <button 
+              onClick={requestPermission} 
+              className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all" 
+              title={language === 'id' ? 'Aktifkan Pengingat' : 'Enable Reminders'}
+            >
+              <BellOff className="w-4 h-4" />
+            </button>
+          )}
+
           <ThemeLanguageToggle />
-          <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-2"></div>
-          <button onClick={handleLogout} className="p-2.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-all" title={t.logout}>
-            <LogOut className="w-5 h-5" />
+
+          <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1"></div>
+
+          <button 
+            id="btn-logout"
+            onClick={handleLogout} 
+            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all" 
+            title={t.logout}
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      <main className="flex-1 p-4 sm:p-8 flex flex-col items-center">
-        
-        {isOffline && (
-          <div className="w-full max-w-md mb-6 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/50 rounded-2xl p-4 flex items-start shadow-sm animate-in fade-in slide-in-from-top-2">
-            <WifiOff className="w-5 h-5 text-yellow-600 dark:text-yellow-400 mr-3 mt-0.5 shrink-0" />
-            <div>
-              <h3 className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">{t.offlineMode}</h3>
-              <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1 leading-relaxed">{t.offlineDesc}</p>
-            </div>
-          </div>
-        )}
+      {/* SECONDARY NAVIGATION BAR (4 TABS) */}
+      <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-[61px] z-30 shadow-xs">
+        <div className="max-w-5xl mx-auto px-4 sm:px-8 flex space-x-1 sm:space-x-4 overflow-x-auto no-scrollbar">
+          <button
+            id="tab-presensi-guru"
+            onClick={() => setActiveTab('attendance')}
+            className={`py-3 px-3 sm:px-4 text-xs font-bold border-b-2 whitespace-nowrap transition-all flex items-center gap-2 ${
+              activeTab === 'attendance'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+            }`}
+          >
+            <CalendarCheck className="w-4 h-4" />
+            <span>{t.tabTeacherAttendance}</span>
+          </button>
 
-        <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 dark:border-gray-800 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
-          <div className="p-8">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-8 text-center tracking-tight">{t.recordAttendance}</h2>
+          <button
+            id="tab-presensi-siswa"
+            onClick={() => setActiveTab('studentAttendance')}
+            className={`py-3 px-3 sm:px-4 text-xs font-bold border-b-2 whitespace-nowrap transition-all flex items-center gap-2 ${
+              activeTab === 'studentAttendance'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+            }`}
+          >
+            <CheckSquare className="w-4 h-4" />
+            <span>{t.tabStudentAttendance}</span>
+          </button>
 
-            {!location && (
-              <div className="text-center animate-in fade-in">
-                <div className="bg-blue-50/50 dark:bg-blue-900/30 border border-blue-100/50 dark:border-blue-800/50 text-blue-800 dark:text-blue-200 p-5 rounded-2xl mb-8 text-sm leading-relaxed">
-                  {t.locWarning}
-                </div>
-                <button
-                  onClick={getLocation}
-                  disabled={locating}
-                  className="w-full flex items-center justify-center py-4 px-4 border border-transparent rounded-2xl shadow-[0_4px_14px_0_rgba(37,99,235,0.39)] text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 hover:shadow-[0_6px_20px_rgba(37,99,235,0.23)] hover:-translate-y-0.5 focus:outline-none disabled:opacity-50 disabled:hover:translate-y-0 transition-all duration-200"
-                >
-                  <MapPin className="w-5 h-5 mr-2" />
-                  {locating ? t.processing : t.getLocation}
-                </button>
-                {locationError && <p className="mt-4 text-sm font-medium text-red-500 dark:text-red-400">{locationError}</p>}
-              </div>
-            )}
+          <button
+            id="tab-mapel-guru"
+            onClick={() => setActiveTab('subjects')}
+            className={`py-3 px-3 sm:px-4 text-xs font-bold border-b-2 whitespace-nowrap transition-all flex items-center gap-2 ${
+              activeTab === 'subjects'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>{t.tabTeacherSubjects}</span>
+          </button>
 
-            {location && !scanning && attendanceStatus === 'idle' && (
-              <div className="text-center animate-in fade-in zoom-in-95 duration-500">
-                <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300 p-5 rounded-2xl mb-8 flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 mr-2" />
-                  <span className="text-sm font-semibold">{t.locVerified}</span>
-                </div>
-                <button
-                  onClick={() => setScanning(true)}
-                  className="w-full flex items-center justify-center py-4 px-4 border border-transparent rounded-2xl shadow-[0_4px_14px_0_rgba(37,99,235,0.39)] text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 hover:shadow-[0_6px_20px_rgba(37,99,235,0.23)] hover:-translate-y-0.5 focus:outline-none transition-all duration-200"
-                >
-                  <Scan className="w-5 h-5 mr-2" />
-                  {t.scanQR}
-                </button>
-              </div>
-            )}
-
-            {scanning && (
-              <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
-                <div className="w-full overflow-hidden rounded-2xl border-[3px] border-gray-100 shadow-inner bg-black">
-                  <Scanner
-                    onScan={(result) => {
-                      if (result && result.length > 0) {
-                        setScanning(false);
-                        handleScanSuccess(result[0].rawValue);
-                      }
-                    }}
-                    onError={(error: any) => {
-                      toast.error('Gagal mengakses kamera: ' + error.message);
-                    }}
-                    components={{
-                      audio: false,
-                      finder: true
-                    }}
-                  />
-                </div>
-                <button
-                  onClick={() => setScanning(false)}
-                  className="w-full py-3.5 px-4 border border-gray-200 dark:border-gray-700 rounded-2xl text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
-                >
-                  {t.cancelScan}
-                </button>
-              </div>
-            )}
-
-            {attendanceStatus === 'success' && (
-              <div className="text-center py-8 animate-in zoom-in-95 duration-500 ease-out">
-                <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm border border-emerald-200 dark:border-emerald-800">
-                  <CheckCircle className="w-10 h-10 text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-3 tracking-tight">{t.success}</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 leading-relaxed max-w-[250px] mx-auto">{statusMessage}</p>
-                <button
-                  onClick={() => setAttendanceStatus('idle')}
-                  className="py-3 px-8 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-2xl text-sm font-semibold hover:bg-gray-800 dark:hover:bg-white hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
-                >
-                  {t.done}
-                </button>
-              </div>
-            )}
-
-            {attendanceStatus === 'error' && (
-              <div className="text-center py-8 animate-in zoom-in-95 duration-500 ease-out">
-                <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm border border-red-200 dark:border-red-800">
-                  <AlertCircle className="w-10 h-10 text-red-600 dark:text-red-400" />
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-3 tracking-tight">{t.failed}</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 leading-relaxed max-w-[250px] mx-auto">{statusMessage}</p>
-                <button
-                  onClick={() => {
-                    setAttendanceStatus('idle');
-                    setScanning(true);
-                  }}
-                  className="py-3 px-8 border border-transparent rounded-2xl shadow-[0_4px_14px_0_rgba(37,99,235,0.39)] text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 hover:-translate-y-0.5 transition-all duration-200"
-                >
-                  {t.tryAgain}
-                </button>
-              </div>
-            )}
-
-          </div>
+          <button
+            id="tab-daftar-siswa"
+            onClick={() => setActiveTab('students')}
+            className={`py-3 px-3 sm:px-4 text-xs font-bold border-b-2 whitespace-nowrap transition-all flex items-center gap-2 ${
+              activeTab === 'students'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>{t.tabTeacherStudents}</span>
+          </button>
         </div>
+      </div>
+
+      {/* MAIN BODY CONTENT */}
+      <main className="flex-1 p-4 sm:p-8 max-w-6xl w-full mx-auto">
+        {activeTab === 'attendance' && <TeacherAttendanceView />}
+        {activeTab === 'studentAttendance' && <TeacherStudentAttendanceView />}
+        {activeTab === 'subjects' && <TeacherSubjectsView />}
+        {activeTab === 'students' && <TeacherStudentsView />}
       </main>
+
+      {/* MODAL GANTI FOTO PROFIL */}
+      <ProfilePhotoModal 
+        isOpen={isPhotoModalOpen} 
+        onClose={() => setIsPhotoModalOpen(false)} 
+      />
     </div>
   );
 }

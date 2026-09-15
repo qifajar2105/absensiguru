@@ -7,6 +7,7 @@
         "email": "string",
         "name": "string",
         "role": "string",
+        "schoolCode": "string",
         "createdAt": "timestamp"
       }
     },
@@ -15,9 +16,11 @@
       "fields": {
         "teacherId": "string",
         "teacherName": "string",
+        "schoolCode": "string",
         "date": "string",
         "timestamp": "timestamp",
         "status": "string",
+        "type": "string",
         "location": "map",
         "distanceFromSchool": "number"
       }
@@ -28,6 +31,53 @@
         "id": "string",
         "location": "map",
         "radius": "number"
+      }
+    },
+    {
+      "name": "subjects",
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "classGrade": "string",
+        "schedule": "string",
+        "teacherId": "string",
+        "teacherName": "string",
+        "schoolCode": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    {
+      "name": "students",
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "nis": "string",
+        "classGrade": "string",
+        "gender": "string",
+        "schoolCode": "string",
+        "teacherId": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    {
+      "name": "student_attendance",
+      "fields": {
+        "id": "string",
+        "subjectId": "string",
+        "subjectName": "string",
+        "classGrade": "string",
+        "date": "string",
+        "teacherId": "string",
+        "teacherName": "string",
+        "schoolCode": "string",
+        "topic": "string",
+        "records": "array",
+        "totalStudents": "number",
+        "hadir": "number",
+        "sakit": "number",
+        "izin": "number",
+        "alpa": "number",
+        "timestamp": "timestamp"
       }
     }
   ]

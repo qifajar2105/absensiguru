@@ -1,12 +1,12 @@
 {
-  "projectId": "academic-hub-zgtt6",
-  "appId": "1:513506346004:web:33cfd930b8ea0ed64bd301",
-  "apiKey": "AIzaSyAHECLdN5vXTovbn6UTR0jbD5Rq9QsqPSg",
-  "authDomain": "academic-hub-zgtt6.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-40155de2-2294-40aa-a261-a7a9d4119b3e",
-  "storageBucket": "academic-hub-zgtt6.firebasestorage.app",
-  "messagingSenderId": "513506346004",
+  "projectId": "gen-lang-client-0419275534",
+  "appId": "1:459725335300:web:ac7ac8012c69197d8cbe51",
+  "apiKey": "AIzaSyBZpmEWvKoo_TCUNMZbqklb9JB0v16N8_s",
+  "authDomain": "gen-lang-client-0419275534.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-remixabsenguru-b8d0d409-fa9f-4252-bfce-87e9666f3dab",
+  "storageBucket": "gen-lang-client-0419275534.firebasestorage.app",
+  "messagingSenderId": "459725335300",
   "measurementId": "",
-  "oAuthClientId": "513506346004-8g93uc3cfig082026o7k2h5rvrml2fte.apps.googleusercontent.com",
+  "oAuthClientId": "459725335300-bn4tmheumsif6acdih75f562c0jbonr9.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }
