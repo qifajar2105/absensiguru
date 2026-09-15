@@ -339,10 +339,14 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       targetLng
     );
 
-    if (distance > targetRadius) {
+    // Incorporate GPS accuracy as a tolerance buffer. Cap tolerance at 50 meters to prevent spoofing.
+    const accuracyTolerance = Math.min(gpsAccuracy || 20, 50);
+    const effectiveRadius = targetRadius + accuracyTolerance;
+
+    if (distance > effectiveRadius) {
       toast.error(`${t.outOfRange} ${Math.round(distance)}m`);
       setAttendanceStatus('error');
-      setStatusMessage(`${t.outOfRangeDesc} (${Math.round(distance)}m > ${targetRadius}m). ${t.fakeGPS}`);
+      setStatusMessage(`${t.outOfRangeDesc} (Jarak Anda: ${Math.round(distance)}m, Batas: ${targetRadius}m + Toleransi GPS: ${accuracyTolerance}m). ${t.fakeGPS}`);
       setIsProcessingScan(false);
       return;
     }
