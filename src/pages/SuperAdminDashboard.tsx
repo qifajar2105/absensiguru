@@ -78,7 +78,8 @@ export default function SuperAdminDashboard() {
       if (u.email) {
         const existing = map.get(u.email.toLowerCase());
         map.set(u.email.toLowerCase(), { 
-          id: u.id, 
+          id: existing?.source === 'collection' ? existing.id : u.id, 
+          userId: u.id,
           email: u.email.toLowerCase(), 
           addedBy: existing?.addedBy || 'Otentikasi Login / Akun User',
           createdAt: existing?.createdAt || u.createdAt
@@ -202,7 +203,7 @@ export default function SuperAdminDashboard() {
     }
   };
 
-  const handleDeleteSuperAdmin = async (id: string, email: string) => {
+  const handleDeleteSuperAdmin = async (id: string, email: string, userId?: string) => {
     if (!isUserPrimarySuperAdmin) return;
     if (isPrimarySuperAdmin(email)) {
       alert(t.mainSuperAdminCantBeDeleted || 'Super Admin Utama tidak dapat dihapus.');
@@ -218,14 +219,25 @@ export default function SuperAdminDashboard() {
            await deleteDoc(doc(db, 'superadmins', sDoc.id));
         }
 
-        // Demote in users collection if account exists
-        const userQ = query(collection(db, 'users'), where('email', '==', email.toLowerCase()));
-        const userSnap = await getDocs(userQ);
-        for (const uDoc of userSnap.docs) {
-          await updateDoc(doc(db, 'users', uDoc.id), {
+        // Demote in users collection if account exists, explicitly by ID if provided
+        if (userId) {
+          await updateDoc(doc(db, 'users', userId), {
             role: 'teacher',
             schoolCode: '',
           });
+        }
+
+        // Fallback: search across all superadmins in users collection just to be safe
+        const userQ = query(collection(db, 'users'), where('role', '==', 'superadmin'));
+        const userSnap = await getDocs(userQ);
+        for (const uDoc of userSnap.docs) {
+          const docData = uDoc.data();
+          if (docData.email && docData.email.toLowerCase() === email.toLowerCase()) {
+            await updateDoc(doc(db, 'users', uDoc.id), {
+              role: 'teacher',
+              schoolCode: '',
+            });
+          }
         }
 
         alert(`Super Admin (${email}) berhasil dihapus.`);
@@ -522,7 +534,7 @@ export default function SuperAdminDashboard() {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right">
                             <button
-                              onClick={() => handleDeleteSuperAdmin(admin.id, admin.email)}
+                              onClick={() => handleDeleteSuperAdmin(admin.id, admin.email, admin.userId)}
                               className="text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 p-2 rounded-lg transition-colors inline-flex items-center gap-1 text-xs font-semibold"
                               title="Hapus Super Admin"
                             >

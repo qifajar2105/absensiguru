@@ -299,8 +299,16 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       return;
     }
 
-    const targetLat = schoolSettings.lat;
-    const targetLng = schoolSettings.lng;
+    const targetLat = schoolSettings.location?.lat ?? schoolSettings.lat;
+    const targetLng = schoolSettings.location?.lng ?? schoolSettings.lng;
+    const targetRadius = schoolSettings.radius || 100;
+
+    if (targetLat === undefined || targetLng === undefined) {
+      toast.error('Pengaturan lokasi sekolah belum valid. Hubungi admin.');
+      setAttendanceStatus('error');
+      setStatusMessage('Gagal mencatat absensi: Pengaturan lokasi sekolah tidak ditemukan.');
+      return;
+    }
 
     const distance = calculateDistance(
       location.lat, 
@@ -309,10 +317,10 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       targetLng
     );
 
-    if (distance > schoolSettings.radius) {
+    if (distance > targetRadius) {
       toast.error(`${t.outOfRange} ${Math.round(distance)}m`);
       setAttendanceStatus('error');
-      setStatusMessage(`${t.outOfRangeDesc} (${Math.round(distance)}m > ${schoolSettings.radius}m). ${t.fakeGPS}`);
+      setStatusMessage(`${t.outOfRangeDesc} (${Math.round(distance)}m > ${targetRadius}m). ${t.fakeGPS}`);
       return;
     }
 
@@ -512,7 +520,7 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               {location 
-                ? `Koordinat: ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)} (Radius ${schoolSettings.radius}m)`
+                ? `Koordinat: ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)} (Radius ${schoolSettings.radius || 100}m)`
                 : 'Lokasi belum terdeteksi. Dapatkan lokasi untuk membuka scan presensi.'}
             </p>
           </div>
