@@ -689,9 +689,16 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
               <div className="space-y-3">
                 <div className="w-full overflow-hidden rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-black aspect-square relative">
                   <Scanner
-                    onScan={(result) => {
-                      if (result && result.length > 0) {
-                        handleScanSuccess(result[0].rawValue);
+                    onScan={(result: any) => {
+                      console.log("Scanner result:", result);
+                      if (Array.isArray(result) && result.length > 0) {
+                        handleScanSuccess(result[0].rawValue || result[0].text || result[0].value);
+                      } else if (result && typeof result === 'object') {
+                        // In case the library passes a single object instead of an array
+                        handleScanSuccess(result.rawValue || result.text || result.value);
+                      } else if (typeof result === 'string') {
+                        // Very old versions might just return the string
+                        handleScanSuccess(result);
                       }
                     }}
                     onError={(error: any) => {

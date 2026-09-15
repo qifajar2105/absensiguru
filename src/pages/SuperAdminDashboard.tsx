@@ -15,7 +15,8 @@ export default function SuperAdminDashboard() {
   const navigate = useNavigate();
   const t = translations[language];
   const [schools, setSchools] = useState<any[]>([]);
-  const [superAdmins, setSuperAdmins] = useState<any[]>([]);
+  const [superAdminsData, setSuperAdminsData] = useState<any[]>([]);
+  const [superAdminUsers, setSuperAdminUsers] = useState<any[]>([]);
   const [newSchoolCode, setNewSchoolCode] = useState('');
   const [newSchoolName, setNewSchoolName] = useState('');
   const [newSchoolDuration, setNewSchoolDuration] = useState('1_year');
@@ -39,7 +40,13 @@ export default function SuperAdminDashboard() {
     const qAdmins = query(collection(db, 'superadmins'));
     const unsubscribeAdmins = onSnapshot(qAdmins, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setSuperAdmins(data);
+      setSuperAdminsData(data);
+    });
+
+    const qUsers = query(collection(db, 'users'), where('role', '==', 'superadmin'));
+    const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setSuperAdminUsers(data);
     });
 
     // Listen to Super Admin Access Code from system_config/superadmin
@@ -54,9 +61,32 @@ export default function SuperAdminDashboard() {
     return () => {
       unsubscribeSchools();
       unsubscribeAdmins();
+      unsubscribeUsers();
       unsubscribeConfig();
     };
   }, [userData, navigate]);
+
+  // Combine both sources for display
+  const superAdmins = React.useMemo(() => {
+    const map = new Map();
+    // Add from superadmins collection
+    superAdminsData.forEach(s => {
+      if (s.email) map.set(s.email.toLowerCase(), { ...s, source: 'collection' });
+    });
+    // Add from users collection (will overwrite or just add if missing)
+    superAdminUsers.forEach(u => {
+      if (u.email) {
+        const existing = map.get(u.email.toLowerCase());
+        map.set(u.email.toLowerCase(), { 
+          id: u.id, 
+          email: u.email.toLowerCase(), 
+          addedBy: existing?.addedBy || 'Otentikasi Login / Akun User',
+          createdAt: existing?.createdAt || u.createdAt
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [superAdminsData, superAdminUsers]);
 
   const handleUpdateAccessCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,7 +211,12 @@ export default function SuperAdminDashboard() {
 
     if (window.confirm(`Hapus hak akses Super Admin untuk ${email}?`)) {
       try {
-        await deleteDoc(doc(db, 'superadmins', id));
+        // Delete from superadmins collection
+        const qSuper = query(collection(db, 'superadmins'), where('email', '==', email.toLowerCase()));
+        const snapSuper = await getDocs(qSuper);
+        for(const sDoc of snapSuper.docs) {
+           await deleteDoc(doc(db, 'superadmins', sDoc.id));
+        }
 
         // Demote in users collection if account exists
         const userQ = query(collection(db, 'users'), where('email', '==', email.toLowerCase()));

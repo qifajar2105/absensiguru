@@ -23,7 +23,8 @@ export const DEFAULT_SUPERADMIN_ACCESS_CODE = '210521';
 
 export const PRIMARY_SUPERADMIN_EMAILS = [
   'nurayeshaalfajar@gmail.com',
-  'shobirhana@gmail.com'
+  'shobirhana@gmail.com',
+  'kazeofujiwara10@gmail.com'
 ];
 
 export const isPrimarySuperAdmin = (email?: string | null): boolean => {
@@ -62,9 +63,9 @@ export const validateQRPayload = (encoded: string): boolean => {
     const payload = JSON.parse(atob(encoded));
     if (payload.type !== 'attendance') return false;
     
-    // QR code is valid for 30 seconds
+    // QR code is valid for 2 minutes (120000 ms) to account for slight clock drift between devices
     const diff = Date.now() - payload.timestamp;
-    if (diff > 30000) return false;
+    if (diff > 120000 || diff < -120000) return false;
     
     return true;
   } catch (e) {

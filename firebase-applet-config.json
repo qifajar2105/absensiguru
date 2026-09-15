@@ -1,12 +1,12 @@
 {
-  "projectId": "gen-lang-client-0419275534",
-  "appId": "1:459725335300:web:ac7ac8012c69197d8cbe51",
-  "apiKey": "AIzaSyBZpmEWvKoo_TCUNMZbqklb9JB0v16N8_s",
-  "authDomain": "gen-lang-client-0419275534.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-remixabsenguru-b8d0d409-fa9f-4252-bfce-87e9666f3dab",
-  "storageBucket": "gen-lang-client-0419275534.firebasestorage.app",
-  "messagingSenderId": "459725335300",
+  "projectId": "sylvan-audio-mghtt",
+  "appId": "1:398759910741:web:a1a4db498ea52e8b06a3dc",
+  "apiKey": "AIzaSyDfXWbZ-k__JYW-h7CGSLEcIfL0BCSqbs8",
+  "authDomain": "sylvan-audio-mghtt.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-remixremixabseng-cc912dc4-f7d9-4741-b3cc-4c1dbfdb759b",
+  "storageBucket": "sylvan-audio-mghtt.firebasestorage.app",
+  "messagingSenderId": "398759910741",
   "measurementId": "",
-  "oAuthClientId": "459725335300-bn4tmheumsif6acdih75f562c0jbonr9.apps.googleusercontent.com",
+  "oAuthClientId": "398759910741-5ohnucpibej61k9a88aogl3nut0cc704.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }
