@@ -262,6 +262,8 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
     }
   };
 
+  const [isProcessingScan, setIsProcessingScan] = useState(false);
+
   const startScan = (type: 'Datang' | 'Pulang' | 'Mengajar') => {
     if (!location) {
       toast.error(t.locNotFoundDesc);
@@ -273,14 +275,19 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
     setScanStep('qr');
     setCapturedPhoto(null);
     setPendingScanData(null);
+    setIsProcessingScan(false);
     setActiveScanType(type);
   };
 
-  const handleScanSuccess = async (qrData: string) => {
+  const handleScanSuccess = async (qrData: string | undefined | null) => {
+    if (isProcessingScan || !qrData) return;
+    setIsProcessingScan(true);
+
     if (!location) {
       toast.error(t.locNotFound);
       setAttendanceStatus('error');
       setStatusMessage(t.locNotFoundDesc);
+      setIsProcessingScan(false);
       return;
     }
 
@@ -289,13 +296,15 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       toast.error('Presensi Ditolak: Terdeteksi manipulasi GPS / Fake GPS.');
       setAttendanceStatus('error');
       setStatusMessage('Presensi ditolak demi integritas data: Terdeteksi anomali sinyal lokasi (Fake GPS).');
+      setIsProcessingScan(false);
       return;
     }
 
     if (!validateQRPayload(qrData)) {
-      toast.error(t.qrInvalid);
+      toast.error(t.qrInvalid || 'QR Code tidak valid atau sudah kadaluarsa.');
       setAttendanceStatus('error');
-      setStatusMessage(t.qrInvalidDesc);
+      setStatusMessage(t.qrInvalidDesc || 'Silakan minta QR Code terbaru dari Admin.');
+      setIsProcessingScan(false);
       return;
     }
 
@@ -307,6 +316,7 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       toast.error('Pengaturan lokasi sekolah belum valid. Hubungi admin.');
       setAttendanceStatus('error');
       setStatusMessage('Gagal mencatat absensi: Pengaturan lokasi sekolah tidak ditemukan.');
+      setIsProcessingScan(false);
       return;
     }
 
@@ -321,6 +331,7 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       toast.error(`${t.outOfRange} ${Math.round(distance)}m`);
       setAttendanceStatus('error');
       setStatusMessage(`${t.outOfRangeDesc} (${Math.round(distance)}m > ${targetRadius}m). ${t.fakeGPS}`);
+      setIsProcessingScan(false);
       return;
     }
 
@@ -329,6 +340,7 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       toast.error('Kode sekolah Anda belum terdaftar. Silakan hubungi admin sekolah Anda.');
       setAttendanceStatus('error');
       setStatusMessage('Gagal mencatat absensi: Kode sekolah akun Anda belum valid.');
+      setIsProcessingScan(false);
       return;
     }
 
@@ -340,8 +352,9 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       scanType
     });
     setScanStep('selfie');
-    toast.success('Barcode valid! Sekarang silakan ambil foto selfie untuk verifikasi wajah.');
+    // REMOVED success popup as requested by user ("untuk scan tidak perlu pop up")
     startSelfieCamera();
+    setIsProcessingScan(false);
   };
 
   const handleTakeSelfie = () => {
@@ -698,19 +711,26 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
                 <div className="w-full overflow-hidden rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-black aspect-square relative">
                   <Scanner
                     onScan={(result: any) => {
-                      console.log("Scanner result:", result);
+                      if (!result) return;
+                      let extracted: string | null = null;
+                      
                       if (Array.isArray(result) && result.length > 0) {
-                        handleScanSuccess(result[0].rawValue || result[0].text || result[0].value);
+                        extracted = result[0].rawValue || result[0].text || result[0].value;
                       } else if (result && typeof result === 'object') {
-                        // In case the library passes a single object instead of an array
-                        handleScanSuccess(result.rawValue || result.text || result.value);
+                        extracted = result.rawValue || result.text || result.value;
                       } else if (typeof result === 'string') {
-                        // Very old versions might just return the string
-                        handleScanSuccess(result);
+                        extracted = result;
                       }
+
+                      if (!extracted) {
+                        toast.error(`Format QR tidak dikenali: ${JSON.stringify(result)}`);
+                        return;
+                      }
+                      
+                      handleScanSuccess(extracted);
                     }}
                     onError={(error: any) => {
-                      toast.error(`${t.cameraError} ${error.message}`);
+                      toast.error(`${t.cameraError} ${error?.message || 'Unknown error'}`);
                     }}
                     components={{
                       audio: false,
