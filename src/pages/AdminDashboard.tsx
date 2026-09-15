@@ -5,6 +5,7 @@ import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, deleteDoc,
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
+import toast from 'react-hot-toast';
 import { 
   LogOut, 
   Download, 
@@ -355,17 +356,9 @@ export default function AdminDashboard() {
           </div>
         </div>
         
-        {/* Mobile Navigation */}
-        <div className="md:hidden bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex overflow-x-auto no-scrollbar px-2 py-1 space-x-1">
-          <button onClick={() => setActiveTab('qr')} className={`px-3 py-2 text-xs font-semibold rounded-lg whitespace-nowrap ${activeTab === 'qr' ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500'}`}>{t.tabQR}</button>
-          <button onClick={() => setActiveTab('rekap')} className={`px-3 py-2 text-xs font-semibold rounded-lg whitespace-nowrap ${activeTab === 'rekap' ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500'}`}>Rekap Guru</button>
-          <button onClick={() => setActiveTab('studentRecap')} className={`px-3 py-2 text-xs font-semibold rounded-lg whitespace-nowrap ${activeTab === 'studentRecap' ? 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400' : 'text-gray-500'}`}>Presensi Siswa</button>
-          <button onClick={() => setActiveTab('masterData')} className={`px-3 py-2 text-xs font-semibold rounded-lg whitespace-nowrap ${activeTab === 'masterData' ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400' : 'text-gray-500'}`}>Siswa & Mapel</button>
-          <button onClick={() => setActiveTab('users')} className={`px-3 py-2 text-xs font-semibold rounded-lg whitespace-nowrap ${activeTab === 'users' ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500'}`}>{t.tabUsers}</button>
-          <button onClick={() => setActiveTab('settings')} className={`px-3 py-2 text-xs font-semibold rounded-lg whitespace-nowrap ${activeTab === 'settings' ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500'}`}>{t.tabSettings}</button>
-        </div>
-
-        <main className="flex-1 overflow-y-auto p-4 sm:p-8">
+        {/* Mobile Navigation (Replaced by Bottom Nav) */}
+        
+        <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-8">
           <div className="max-w-5xl mx-auto">
             
             {/* 1. STUDENT RECAP TAB */}
@@ -740,29 +733,34 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  <div>
+                  <div className="pt-2">
                     <button 
                       type="button"
                       onClick={() => {
                         if ('geolocation' in navigator) {
+                          const toastId = toast.loading('Sedang melacak lokasi Anda...', { style: { fontSize: '12px' } });
                           navigator.geolocation.getCurrentPosition(
                             (position) => {
                               setSchoolLocation({
                                 lat: position.coords.latitude,
                                 lng: position.coords.longitude
                               });
+                              toast.success('Titik kordinat berhasil diperbarui secara otomatis!', { id: toastId, style: { fontSize: '12px' } });
                             },
-                            () => alert('Gagal mendapatkan lokasi. Pastikan GPS aktif.'),
-                            { enableHighAccuracy: true }
+                            (err) => {
+                              console.error(err);
+                              toast.error(`Gagal mendapatkan lokasi. Pastikan GPS Anda aktif dan beri izin browser. (${err.message})`, { id: toastId, style: { fontSize: '12px' } });
+                            },
+                            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
                           );
                         } else {
-                          alert('Browser Anda tidak mendukung Geolocation.');
+                          toast.error('Browser Anda tidak mendukung Geolocation.', { style: { fontSize: '12px' } });
                         }
                       }}
-                      className="flex items-center text-xs text-blue-600 hover:text-blue-800 transition-colors font-semibold"
+                      className="w-full sm:w-auto flex justify-center items-center px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 rounded-xl text-xs font-semibold transition-colors"
                     >
-                      <MapPin className="w-4 h-4 mr-1" />
-                      {t.getLocationAuto}
+                      <MapPin className="w-4 h-4 mr-2" />
+                      Dapatkan Titik Kordinat Saat Ini Otomatis
                     </button>
                   </div>
 
@@ -790,6 +788,40 @@ export default function AdminDashboard() {
             )}
           </div>
         </main>
+
+        {/* --- MOBILE BOTTOM NAVIGATION (Android) --- */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 z-50 flex justify-between items-center px-1 pb-safe pt-1 shadow-[0_-2px_10px_rgba(0,0,0,0.02)] overflow-x-auto no-scrollbar">
+          <button onClick={() => setActiveTab('qr')} className={`flex flex-col items-center justify-center min-w-[64px] py-2 flex-1 ${activeTab === 'qr' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
+            <div className={`p-1 rounded-xl mb-1 ${activeTab === 'qr' ? 'bg-blue-50 dark:bg-blue-900/40' : ''}`}><QrCodeIcon className="w-5 h-5" /></div>
+            <span className="text-[9px] font-bold">QR</span>
+          </button>
+          
+          <button onClick={() => setActiveTab('rekap')} className={`flex flex-col items-center justify-center min-w-[64px] py-2 flex-1 ${activeTab === 'rekap' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
+            <div className={`p-1 rounded-xl mb-1 ${activeTab === 'rekap' ? 'bg-blue-50 dark:bg-blue-900/40' : ''}`}><Calendar className="w-5 h-5" /></div>
+            <span className="text-[9px] font-bold leading-tight text-center">Rekap Guru</span>
+          </button>
+
+          <button onClick={() => setActiveTab('studentRecap')} className={`flex flex-col items-center justify-center min-w-[64px] py-2 flex-1 ${activeTab === 'studentRecap' ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400'}`}>
+            <div className={`p-1 rounded-xl mb-1 ${activeTab === 'studentRecap' ? 'bg-emerald-50 dark:bg-emerald-900/40' : ''}`}><CheckSquare className="w-5 h-5" /></div>
+            <span className="text-[9px] font-bold leading-tight text-center">Rekap Siswa</span>
+          </button>
+
+          <button onClick={() => setActiveTab('masterData')} className={`flex flex-col items-center justify-center min-w-[64px] py-2 flex-1 ${activeTab === 'masterData' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}>
+            <div className={`p-1 rounded-xl mb-1 ${activeTab === 'masterData' ? 'bg-indigo-50 dark:bg-indigo-900/40' : ''}`}><BookOpen className="w-5 h-5" /></div>
+            <span className="text-[9px] font-bold leading-tight text-center">Data Siswa</span>
+          </button>
+
+          <button onClick={() => setActiveTab('users')} className={`flex flex-col items-center justify-center min-w-[64px] py-2 flex-1 ${activeTab === 'users' ? 'text-purple-600 dark:text-purple-400' : 'text-gray-500 dark:text-gray-400'}`}>
+            <div className={`p-1 rounded-xl mb-1 ${activeTab === 'users' ? 'bg-purple-50 dark:bg-purple-900/40' : ''}`}><Users className="w-5 h-5" /></div>
+            <span className="text-[9px] font-bold">Akun</span>
+          </button>
+
+          <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center justify-center min-w-[64px] py-2 flex-1 ${activeTab === 'settings' ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
+            <div className={`p-1 rounded-xl mb-1 ${activeTab === 'settings' ? 'bg-gray-100 dark:bg-gray-800' : ''}`}><Settings className="w-5 h-5" /></div>
+            <span className="text-[9px] font-bold">Pengaturan</span>
+          </button>
+        </nav>
+
       </div>
     </div>
   );

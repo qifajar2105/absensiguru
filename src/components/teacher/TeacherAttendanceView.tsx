@@ -96,14 +96,26 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Browser atau perangkat ini tidak mendukung kamera selfie.');
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'user',
-          width: { ideal: 640 },
-          height: { ideal: 640 }
-        },
-        audio: false
-      });
+      
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 640 },
+            height: { ideal: 640 }
+          },
+          audio: false
+        });
+      } catch (err: any) {
+        // Fallback if specific constraints fail or hardware is temporarily locked (NotReadableError)
+        console.warn('Initial selfie camera request failed, trying fallback:', err);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false
+        });
+      }
+
       setVideoStream(stream);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -353,7 +365,12 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
     });
     setScanStep('selfie');
     // REMOVED success popup as requested by user ("untuk scan tidak perlu pop up")
-    startSelfieCamera();
+    
+    // Add delay to let the QR scanner unmount and release the hardware camera stream
+    setTimeout(() => {
+      startSelfieCamera();
+    }, 800);
+    
     setIsProcessingScan(false);
   };
 
