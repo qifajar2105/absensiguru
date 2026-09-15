@@ -4,11 +4,11 @@ import { collection, query, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp,
 import { signOut } from 'firebase/auth';
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Plus, Trash2, Key, Users, CheckCircle, Crown } from 'lucide-react';
+import { Shield, Plus, Trash2, Key, Users, CheckCircle, Crown, ShieldCheck, Eye, EyeOff, Lock, Check } from 'lucide-react';
 import { ThemeLanguageToggle } from '../components/ThemeLanguageToggle';
 import { translations } from '../lib/translations';
 import { addMonths, addYears, format } from 'date-fns';
-import { isPrimarySuperAdmin, PRIMARY_SUPERADMIN_EMAILS } from '../lib/utils';
+import { isPrimarySuperAdmin, PRIMARY_SUPERADMIN_EMAILS, DEFAULT_SUPERADMIN_ACCESS_CODE } from '../lib/utils';
 
 export default function SuperAdminDashboard() {
   const { userData, language } = useStore();
@@ -21,6 +21,13 @@ export default function SuperAdminDashboard() {
   const [newSchoolDuration, setNewSchoolDuration] = useState('1_year');
   const [newSuperAdminEmail, setNewSuperAdminEmail] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Access Code State (default: 210521)
+  const [accessCode, setAccessCode] = useState(DEFAULT_SUPERADMIN_ACCESS_CODE);
+  const [newCodeInput, setNewCodeInput] = useState('');
+  const [isSavingCode, setIsSavingCode] = useState(false);
+  const [showCode, setShowCode] = useState(false);
+  const [codeSuccessMsg, setCodeSuccessMsg] = useState('');
 
   useEffect(() => {
     const qSchools = query(collection(db, 'licenses'));
@@ -35,11 +42,50 @@ export default function SuperAdminDashboard() {
       setSuperAdmins(data);
     });
 
+    // Listen to Super Admin Access Code from system_config/superadmin
+    const unsubscribeConfig = onSnapshot(doc(db, 'system_config', 'superadmin'), (docSnap) => {
+      if (docSnap.exists() && docSnap.data()?.accessCode) {
+        setAccessCode(String(docSnap.data()?.accessCode));
+      } else {
+        setAccessCode(DEFAULT_SUPERADMIN_ACCESS_CODE);
+      }
+    });
+
     return () => {
       unsubscribeSchools();
       unsubscribeAdmins();
+      unsubscribeConfig();
     };
   }, [userData, navigate]);
+
+  const handleUpdateAccessCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = newCodeInput.trim();
+    if (!cleanCode) return;
+    if (cleanCode.length < 4) {
+      alert('Kode khusus Super Admin minimal 4 karakter / digit.');
+      return;
+    }
+
+    setIsSavingCode(true);
+    setCodeSuccessMsg('');
+    try {
+      await setDoc(doc(db, 'system_config', 'superadmin'), {
+        accessCode: cleanCode,
+        updatedBy: userData?.email || 'Super Admin',
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+
+      setNewCodeInput('');
+      setCodeSuccessMsg(`Kode khusus berhasil diubah menjadi: ${cleanCode}`);
+      setTimeout(() => setCodeSuccessMsg(''), 4000);
+    } catch (err: any) {
+      console.error('Error updating access code:', err);
+      alert('Gagal mengubah kode khusus: ' + (err.message || 'Terjadi kesalahan'));
+    } finally {
+      setIsSavingCode(false);
+    }
+  };
 
   const handleAddSchool = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -283,6 +329,82 @@ export default function SuperAdminDashboard() {
             </tbody>
           </table>
         </div>
+        {/* KARTU PENGATURAN KODE KHUSUS SUPER ADMIN */}
+        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden mb-8">
+          <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 flex items-center justify-center">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+                  Kode Khusus Akses Super Admin
+                </h2>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Kode keamanan yang wajib dimasukkan pada halaman login / registrasi saat memilih peran Super Admin.
+              </p>
+            </div>
+
+            {/* Current Active Code Badge */}
+            <div className="flex items-center gap-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 px-4 py-2.5 rounded-xl self-start sm:self-auto">
+              <span className="text-xs font-medium text-amber-900 dark:text-amber-200">Kode Aktif:</span>
+              <span className="font-mono font-black text-base text-amber-700 dark:text-amber-400 tracking-wider">
+                {showCode ? accessCode : '••••••'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowCode(!showCode)}
+                className="text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 p-1 transition-colors"
+                title={showCode ? 'Sembunyikan' : 'Lihat Kode'}
+              >
+                {showCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div className="p-6 bg-gray-50/50 dark:bg-gray-800/30">
+            {codeSuccessMsg && (
+              <div className="mb-4 p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl flex items-center gap-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{codeSuccessMsg}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateAccessCode} className="flex flex-col sm:flex-row gap-4 sm:items-end">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Ubah Kode Khusus Baru
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+                    <Key className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={newCodeInput}
+                    onChange={(e) => setNewCodeInput(e.target.value)}
+                    placeholder="Ketik kode baru (misal: 6 digit rahasia Anda)"
+                    className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl dark:text-white text-sm font-mono focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={isSavingCode || !newCodeInput.trim()}
+                className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shrink-0 text-sm shadow-sm"
+              >
+                <Lock className="w-4 h-4" />
+                {isSavingCode ? 'Menyimpan...' : 'Simpan Kode Baru'}
+              </button>
+            </form>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">
+              * Perubahan kode langsung berlaku secara instan untuk pendaftaran / login Super Admin berikutnya.
+            </p>
+          </div>
+        </div>
+
         <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden mb-8">
           <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
             <h2 className="text-lg font-bold dark:text-white flex items-center">

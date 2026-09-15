@@ -74,4 +74,8 @@ export interface TeacherAttendance {
   type: 'Datang' | 'Pulang' | 'Mengajar' | 'Absen Harian';
   location?: { lat: number; lng: number };
   distanceFromSchool?: number;
+  photoSelfie?: string;
+  gpsAccuracy?: number;
+  isAnomalyDetected?: boolean;
+  anomalyReason?: string;
 }

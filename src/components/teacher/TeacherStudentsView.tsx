@@ -3,9 +3,11 @@ import { useStore } from '../../store/useStore';
 import { db } from '../../lib/firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Student } from '../../types';
-import { Users, Plus, Edit2, Trash2, X, Search, Filter, Layers, UserPlus } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, X, Search, Filter, Layers, UserPlus, WifiOff, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { translations } from '../../lib/translations';
+import { normalizeSchoolCode } from '../../lib/utils';
+import { offlineStorage } from '../../lib/offlineStorage';
 
 export default function TeacherStudentsView() {
   const { userData, language } = useStore();
@@ -13,6 +15,7 @@ export default function TeacherStudentsView() {
 
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isFromCache, setIsFromCache] = useState(false);
   const [selectedClass, setSelectedClass] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -34,32 +37,62 @@ export default function TeacherStudentsView() {
   const [batchSubmitting, setBatchSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!userData?.schoolCode) {
-      // Fallback query if no schoolCode
-      const q = query(collection(db, 'students'));
-      const unsub = onSnapshot(q, (snapshot) => {
-        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-        setStudents(list);
-        setLoading(false);
-      });
-      return () => unsub();
+    const teacherSchool = normalizeSchoolCode(userData?.schoolCode);
+    if (!teacherSchool) {
+      setStudents([]);
+      setLoading(false);
+      return;
     }
 
-    // Load students of this school
+    // 1. Instant Cache Load (Stale-While-Revalidate)
+    const cached = offlineStorage.getStudents(teacherSchool);
+    if (cached && cached.length > 0) {
+      setStudents(cached);
+      setIsFromCache(true);
+      setLoading(false);
+    }
+
+    const possibleCodes = Array.from(new Set([
+      teacherSchool,
+      teacherSchool.toLowerCase(),
+      teacherSchool.toUpperCase()
+    ]));
+
+    // 2. Load students strictly for this school from Firestore
     const q = query(
       collection(db, 'students'),
-      where('schoolCode', '==', userData.schoolCode)
+      where('schoolCode', 'in', possibleCodes)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+      const list = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() } as Student))
+        .filter(s => normalizeSchoolCode(s.schoolCode) === teacherSchool);
       // Sort alphabetically by name
       list.sort((a, b) => a.name.localeCompare(b.name));
       setStudents(list);
+      setIsFromCache(false);
       setLoading(false);
+      // Persist to local offline cache
+      offlineStorage.saveStudents(teacherSchool, list);
     }, (err) => {
-      console.error("Error loading students:", err);
-      setLoading(false);
+      console.error("Error loading students (falling back to offline cache):", err);
+      const fallbackQ = query(collection(db, 'students'));
+      onSnapshot(fallbackQ, (snap) => {
+        const list = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Student))
+          .filter(s => normalizeSchoolCode(s.schoolCode) === teacherSchool);
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        setStudents(list);
+        setIsFromCache(false);
+        setLoading(false);
+        offlineStorage.saveStudents(teacherSchool, list);
+      }, () => {
+        // If network completely unavailable, ensure cached list remains visible
+        if (!cached || cached.length === 0) {
+          setLoading(false);
+        }
+      });
     });
 
     return () => unsubscribe();
@@ -113,12 +146,13 @@ export default function TeacherStudentsView() {
         });
         toast.success('Data siswa berhasil diperbarui!');
       } else {
+        const teacherSchool = normalizeSchoolCode(userData?.schoolCode);
         await addDoc(collection(db, 'students'), {
           name: formName.trim(),
           nis: formNis.trim() || '-',
           classGrade: formClass.trim(),
           gender: formGender,
-          schoolCode: userData?.schoolCode || 'DEFAULT',
+          schoolCode: teacherSchool || 'DEFAULT',
           teacherId: userData?.uid,
           createdAt: serverTimestamp()
         });
@@ -149,6 +183,7 @@ export default function TeacherStudentsView() {
     }
 
     setBatchSubmitting(true);
+    const teacherSchool = normalizeSchoolCode(userData?.schoolCode);
     try {
       const batch = writeBatch(db);
       lines.forEach((line) => {
@@ -162,16 +197,16 @@ export default function TeacherStudentsView() {
           if (parts.length >= 2) {
             // Check if first part looks like NIS
             if (/^\d+$/.test(parts[0])) {
-              nis = parts[0];
-              name = parts[1];
-              if (parts[2] && (parts[2].toUpperCase() === 'P' || parts[2].toUpperCase() === 'L')) {
-                gender = parts[2].toUpperCase() as 'L' | 'P';
-              }
+               nis = parts[0];
+               name = parts[1];
+               if (parts[2] && (parts[2].toUpperCase() === 'P' || parts[2].toUpperCase() === 'L')) {
+                 gender = parts[2].toUpperCase() as 'L' | 'P';
+               }
             } else {
-              name = parts[0];
-              if (parts[1] && (parts[1].toUpperCase() === 'P' || parts[1].toUpperCase() === 'L')) {
-                gender = parts[1].toUpperCase() as 'L' | 'P';
-              }
+               name = parts[0];
+               if (parts[1] && (parts[1].toUpperCase() === 'P' || parts[1].toUpperCase() === 'L')) {
+                 gender = parts[1].toUpperCase() as 'L' | 'P';
+               }
             }
           }
         }
@@ -182,7 +217,7 @@ export default function TeacherStudentsView() {
           nis,
           classGrade: batchClass.trim(),
           gender,
-          schoolCode: userData?.schoolCode || 'DEFAULT',
+          schoolCode: teacherSchool || 'DEFAULT',
           teacherId: userData?.uid,
           createdAt: serverTimestamp()
         });
@@ -219,9 +254,23 @@ export default function TeacherStudentsView() {
             <Users className="w-5 h-5 text-blue-600" />
             {t.tabTeacherStudents}
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Daftar siswa sekolah tersinkronisasi langsung dengan Admin Sekolah untuk keperluan presensi mapel harian.
-          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Daftar siswa sekolah tersinkronisasi langsung dengan Admin Sekolah untuk keperluan presensi mapel harian.
+            </p>
+            {isFromCache && (
+              <span className="inline-flex items-center gap-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 font-medium px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                <WifiOff className="w-3 h-3" />
+                Mode Offline
+              </span>
+            )}
+            {!isFromCache && students.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-medium px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                <CheckCircle2 className="w-3 h-3" />
+                Tersimpan Offline
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button

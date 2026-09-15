@@ -15,6 +15,8 @@ import {
 } from 'firebase/firestore';
 import { Subject, Student, StudentStatus, StudentAttendanceRecord, StudentAttendanceSession } from '../../types';
 import { format } from 'date-fns';
+import { normalizeSchoolCode } from '../../lib/utils';
+import { offlineStorage } from '../../lib/offlineStorage';
 import { 
   CheckSquare, 
   Users, 
@@ -111,11 +113,17 @@ export default function TeacherStudentAttendanceView() {
     const fetchStudentsAndExisting = async () => {
       try {
         // Query students in this school with matching classGrade
+        const teacherSchool = normalizeSchoolCode(userData?.schoolCode);
         let qStudents;
-        if (userData?.schoolCode) {
+        if (teacherSchool) {
+          const possibleCodes = Array.from(new Set([
+            teacherSchool,
+            teacherSchool.toLowerCase(),
+            teacherSchool.toUpperCase()
+          ]));
           qStudents = query(
             collection(db, 'students'),
-            where('schoolCode', '==', userData.schoolCode),
+            where('schoolCode', 'in', possibleCodes),
             where('classGrade', '==', selectedSubject.classGrade)
           );
         } else {
@@ -126,7 +134,10 @@ export default function TeacherStudentAttendanceView() {
         }
 
         const snap = await getDocs(qStudents);
-        const list = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as Student));
+        let list = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as Student));
+        if (teacherSchool) {
+          list = list.filter(s => normalizeSchoolCode(s.schoolCode) === teacherSchool);
+        }
         list.sort((a, b) => a.name.localeCompare(b.name));
         setStudents(list);
 
@@ -168,6 +179,21 @@ export default function TeacherStudentAttendanceView() {
         }
       } catch (err) {
         console.error("Error loading students for attendance:", err);
+        // Offline fallback from local cache
+        const teacherSchool = normalizeSchoolCode(userData?.schoolCode);
+        if (teacherSchool && selectedSubject) {
+          const cachedStudents = offlineStorage.getStudents(teacherSchool);
+          if (cachedStudents && cachedStudents.length > 0) {
+            const classStudents = cachedStudents.filter(s => s.classGrade === selectedSubject.classGrade);
+            classStudents.sort((a, b) => a.name.localeCompare(b.name));
+            setStudents(classStudents);
+            const defaultRec: Record<string, { status: StudentStatus; note: string }> = {};
+            classStudents.forEach(st => {
+              defaultRec[st.id] = { status: 'Hadir', note: '' };
+            });
+            setRecords(defaultRec);
+          }
+        }
       } finally {
         setLoadingStudents(false);
       }
@@ -247,6 +273,7 @@ export default function TeacherStudentAttendanceView() {
         note: records[s.id]?.note || ''
       }));
 
+      const teacherSchool = normalizeSchoolCode(userData?.schoolCode);
       const sessionData = {
         subjectId: selectedSubject.id,
         subjectName: selectedSubject.name,
@@ -254,7 +281,7 @@ export default function TeacherStudentAttendanceView() {
         date: attendanceDate,
         teacherId: userData?.uid,
         teacherName: userData?.name || 'Guru',
-        schoolCode: userData?.schoolCode || 'DEFAULT',
+        schoolCode: teacherSchool || 'DEFAULT',
         topic: topic.trim(),
         records: recordsPayload,
         totalStudents: total,

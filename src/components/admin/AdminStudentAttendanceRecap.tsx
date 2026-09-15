@@ -22,6 +22,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import toast from 'react-hot-toast';
 import { translations } from '../../lib/translations';
+import { normalizeSchoolCode } from '../../lib/utils';
 
 export default function AdminStudentAttendanceRecap() {
   const { userData, language } = useStore();
@@ -40,31 +41,40 @@ export default function AdminStudentAttendanceRecap() {
   const [selectedSession, setSelectedSession] = useState<StudentAttendanceSession | null>(null);
 
   useEffect(() => {
-    if (!userData?.schoolCode) {
+    const adminSchool = normalizeSchoolCode(userData?.schoolCode);
+    if (!adminSchool) {
+      setSessions([]);
       setLoading(false);
       return;
     }
 
-    // Query sessions for this school
+    const possibleCodes = Array.from(new Set([
+      adminSchool,
+      adminSchool.toLowerCase(),
+      adminSchool.toUpperCase()
+    ]));
+
+    // Query sessions strictly for this school
     const q = query(
       collection(db, 'student_attendance'),
-      where('schoolCode', '==', userData.schoolCode),
+      where('schoolCode', 'in', possibleCodes),
       orderBy('timestamp', 'desc')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as StudentAttendanceSession));
+      const list = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() } as StudentAttendanceSession))
+        .filter(s => normalizeSchoolCode(s.schoolCode) === adminSchool);
       setSessions(list);
       setLoading(false);
     }, (err) => {
       console.warn("Error loading student attendance for admin (indexing/offline):", err);
-      // Fallback query without composite order if index building
-      const fallbackQ = query(
-        collection(db, 'student_attendance'),
-        where('schoolCode', '==', userData.schoolCode)
-      );
+      // Fallback query
+      const fallbackQ = query(collection(db, 'student_attendance'));
       onSnapshot(fallbackQ, (fallbackSnap) => {
-        const list = fallbackSnap.docs.map(d => ({ id: d.id, ...d.data() } as StudentAttendanceSession));
+        const list = fallbackSnap.docs
+          .map(d => ({ id: d.id, ...d.data() } as StudentAttendanceSession))
+          .filter(s => normalizeSchoolCode(s.schoolCode) === adminSchool);
         list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         setSessions(list);
         setLoading(false);

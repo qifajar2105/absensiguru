@@ -1,4 +1,6 @@
 import { getDistance } from 'geolib';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from './firebase';
 
 export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   return getDistance(
@@ -17,6 +19,8 @@ export const generateDailyQRData = () => {
 
 export const STATIC_QR_PAYLOAD = 'ACADEMIC_HUB_STATIC_QR_SECURE_V1';
 
+export const DEFAULT_SUPERADMIN_ACCESS_CODE = '210521';
+
 export const PRIMARY_SUPERADMIN_EMAILS = [
   'nurayeshaalfajar@gmail.com',
   'shobirhana@gmail.com'
@@ -25,6 +29,27 @@ export const PRIMARY_SUPERADMIN_EMAILS = [
 export const isPrimarySuperAdmin = (email?: string | null): boolean => {
   if (!email) return false;
   return PRIMARY_SUPERADMIN_EMAILS.includes(email.trim().toLowerCase());
+};
+
+// Normalize school code across entire app
+export const normalizeSchoolCode = (code?: string | null): string => {
+  if (!code) return '';
+  return code.trim().toUpperCase();
+};
+
+export const getSuperAdminAccessCode = async (): Promise<string> => {
+  try {
+    const configSnap = await getDoc(doc(db, 'system_config', 'superadmin'));
+    if (configSnap.exists()) {
+      const val = configSnap.data()?.accessCode;
+      if (val && String(val).trim().length > 0) {
+        return String(val).trim();
+      }
+    }
+  } catch (err) {
+    console.warn('Could not read system_config/superadmin, falling back to default:', err);
+  }
+  return DEFAULT_SUPERADMIN_ACCESS_CODE;
 };
 
 export const validateQRPayload = (encoded: string): boolean => {

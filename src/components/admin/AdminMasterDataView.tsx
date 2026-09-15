@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { translations } from '../../lib/translations';
+import { normalizeSchoolCode } from '../../lib/utils';
 
 export default function AdminMasterDataView() {
   const { userData, language } = useStore();
@@ -57,30 +58,47 @@ export default function AdminMasterDataView() {
   const [subTeacherName, setSubTeacherName] = useState('');
 
   useEffect(() => {
-    if (!userData?.schoolCode) return;
+    const adminSchool = normalizeSchoolCode(userData?.schoolCode);
+    if (!adminSchool) {
+      setStudents([]);
+      setSubjects([]);
+      setLoadingStudents(false);
+      setLoadingSubjects(false);
+      return;
+    }
 
-    // Load Students for this school
+    const possibleCodes = Array.from(new Set([
+      adminSchool,
+      adminSchool.toLowerCase(),
+      adminSchool.toUpperCase()
+    ]));
+
+    // Load Students strictly for this school
     const qStudents = query(
       collection(db, 'students'),
-      where('schoolCode', '==', userData.schoolCode)
+      where('schoolCode', 'in', possibleCodes)
     );
     const unsubStudents = onSnapshot(qStudents, (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+      const list = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Student))
+        .filter(s => normalizeSchoolCode(s.schoolCode) === adminSchool);
       list.sort((a, b) => a.name.localeCompare(b.name));
       setStudents(list);
       setLoadingStudents(false);
-    });
+    }, () => setLoadingStudents(false));
 
-    // Load Subjects for this school
+    // Load Subjects strictly for this school
     const qSubjects = query(
       collection(db, 'subjects'),
-      where('schoolCode', '==', userData.schoolCode)
+      where('schoolCode', 'in', possibleCodes)
     );
     const unsubSubjects = onSnapshot(qSubjects, (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Subject));
+      const list = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Subject))
+        .filter(s => normalizeSchoolCode(s.schoolCode) === adminSchool);
       setSubjects(list);
       setLoadingSubjects(false);
-    });
+    }, () => setLoadingSubjects(false));
 
     return () => {
       unsubStudents();
@@ -97,6 +115,7 @@ export default function AdminMasterDataView() {
       toast.error('Nama dan Kelas wajib diisi!');
       return;
     }
+    const adminSchool = normalizeSchoolCode(userData?.schoolCode);
     try {
       if (editingStudent) {
         await updateDoc(doc(db, 'students', editingStudent.id), {
@@ -113,7 +132,7 @@ export default function AdminMasterDataView() {
           nis: sNis.trim() || '-',
           classGrade: sClass.trim(),
           gender: sGender,
-          schoolCode: userData?.schoolCode || 'DEFAULT',
+          schoolCode: adminSchool || 'DEFAULT',
           createdAt: serverTimestamp()
         });
         toast.success('Siswa baru berhasil ditambahkan!');
@@ -137,6 +156,7 @@ export default function AdminMasterDataView() {
       return;
     }
 
+    const adminSchool = normalizeSchoolCode(userData?.schoolCode);
     try {
       const batch = writeBatch(db);
       lines.forEach(line => {
@@ -168,7 +188,7 @@ export default function AdminMasterDataView() {
           nis,
           classGrade: batchClass.trim(),
           gender,
-          schoolCode: userData?.schoolCode || 'DEFAULT',
+          schoolCode: adminSchool || 'DEFAULT',
           createdAt: serverTimestamp()
         });
       });
@@ -189,6 +209,7 @@ export default function AdminMasterDataView() {
       toast.error('Nama Mapel dan Kelas wajib diisi!');
       return;
     }
+    const adminSchool = normalizeSchoolCode(userData?.schoolCode);
     try {
       if (editingSubject) {
         await updateDoc(doc(db, 'subjects', editingSubject.id), {
@@ -206,7 +227,7 @@ export default function AdminMasterDataView() {
           schedule: subSchedule.trim(),
           teacherName: subTeacherName.trim() || 'Admin Sekolah',
           teacherId: userData?.uid,
-          schoolCode: userData?.schoolCode || 'DEFAULT',
+          schoolCode: adminSchool || 'DEFAULT',
           createdAt: serverTimestamp()
         });
         toast.success('Mata pelajaran ditambahkan!');

@@ -3,9 +3,11 @@ import { useStore } from '../../store/useStore';
 import { db } from '../../lib/firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { Subject } from '../../types';
-import { BookOpen, Plus, Edit2, Trash2, X, Users, Clock } from 'lucide-react';
+import { BookOpen, Plus, Edit2, Trash2, X, Users, Clock, WifiOff, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { translations } from '../../lib/translations';
+import { normalizeSchoolCode } from '../../lib/utils';
+import { offlineStorage } from '../../lib/offlineStorage';
 
 export default function TeacherSubjectsView() {
   const { userData, language } = useStore();
@@ -13,6 +15,8 @@ export default function TeacherSubjectsView() {
 
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isFromCache, setIsFromCache] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -25,7 +29,22 @@ export default function TeacherSubjectsView() {
   useEffect(() => {
     if (!userData?.uid) return;
 
-    // Listen to subjects where teacherId == userData.uid
+    const teacherSchool = normalizeSchoolCode(userData?.schoolCode) || 'DEFAULT';
+
+    // 1. Instant cache load (Stale-While-Revalidate pattern)
+    const cached = offlineStorage.getSubjects(teacherSchool, userData.uid);
+    if (cached && cached.length > 0) {
+      setSubjects(cached);
+      setIsFromCache(true);
+      setLoading(false);
+    }
+
+    const syncTime = offlineStorage.getLastSync('subjects', teacherSchool);
+    if (syncTime) {
+      setLastSyncTime(syncTime);
+    }
+
+    // 2. Listen to Firestore (updates cache in background or works when reconnected)
     const q = query(
       collection(db, 'subjects'),
       where('teacherId', '==', userData.uid)
@@ -34,10 +53,17 @@ export default function TeacherSubjectsView() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Subject));
       setSubjects(list);
+      setIsFromCache(false);
       setLoading(false);
+      // Save fresh copy to local cache
+      offlineStorage.saveSubjects(teacherSchool, userData.uid, list);
+      setLastSyncTime(new Date().toISOString());
     }, (err) => {
-      console.error("Error loading subjects:", err);
-      setLoading(false);
+      console.error("Error loading subjects (using local offline cache):", err);
+      // If Firestore fails or device is offline, keep showing cached list
+      if (!cached || cached.length === 0) {
+        setLoading(false);
+      }
     });
 
     return () => unsubscribe();
@@ -79,13 +105,14 @@ export default function TeacherSubjectsView() {
         toast.success('Mata pelajaran berhasil diperbarui!');
       } else {
         // Add
+        const teacherSchool = normalizeSchoolCode(userData?.schoolCode);
         await addDoc(collection(db, 'subjects'), {
           name: formName.trim(),
           classGrade: formClass.trim(),
           schedule: formSchedule.trim(),
           teacherId: userData?.uid,
           teacherName: userData?.name || 'Guru',
-          schoolCode: userData?.schoolCode || 'DEFAULT',
+          schoolCode: teacherSchool || 'DEFAULT',
           createdAt: serverTimestamp()
         });
         toast.success('Mata pelajaran berhasil ditambahkan & tersinkron ke Admin!');
@@ -117,9 +144,23 @@ export default function TeacherSubjectsView() {
             <BookOpen className="w-5 h-5 text-blue-600" />
             {t.tabTeacherSubjects}
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Kelola mata pelajaran dan rombongan belajar (kelas) yang Anda ampu di sekolah ini.
-          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Kelola mata pelajaran dan rombongan belajar (kelas) yang Anda ampu di sekolah ini.
+            </p>
+            {isFromCache && (
+              <span className="inline-flex items-center gap-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 font-medium px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                <WifiOff className="w-3 h-3" />
+                Mode Offline (Memori Lokal)
+              </span>
+            )}
+            {!isFromCache && subjects.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-medium px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                <CheckCircle2 className="w-3 h-3" />
+                Tersimpan Offline
+              </span>
+            )}
+          </div>
         </div>
         <button
           id="btn-add-subject"

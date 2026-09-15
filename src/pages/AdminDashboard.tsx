@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { db, auth } from '../lib/firebase';
-import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, deleteDoc, where } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, deleteDoc, where, serverTimestamp } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -15,10 +15,16 @@ import {
   Users, 
   CheckSquare, 
   BookOpen, 
-  Shield 
+  Shield,
+  Camera,
+  ShieldCheck,
+  ShieldAlert,
+  AlertTriangle,
+  Eye,
+  X
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { generateDailyQRData, STATIC_QR_PAYLOAD } from '../lib/utils';
+import { generateDailyQRData, STATIC_QR_PAYLOAD, normalizeSchoolCode } from '../lib/utils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -41,6 +47,7 @@ export default function AdminDashboard() {
   const [schoolRadius, setSchoolRadius] = useState(100);
   const [usersList, setUsersList] = useState<any[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [selectedSelfieModal, setSelectedSelfieModal] = useState<any | null>(null);
 
   // Derived state for filtered attendances
   const filteredAttendances = attendances.filter(a => a.date && a.date.startsWith(selectedMonth));
@@ -58,11 +65,18 @@ export default function AdminDashboard() {
   }, [activeTab, qrMode]);
 
   useEffect(() => {
-    // Fetch School Settings
+    const adminSchool = normalizeSchoolCode(userData?.schoolCode);
+
+    // Fetch School Settings (per school, with fallback to main)
     const fetchSettings = async () => {
       try {
-        const docRef = doc(db, 'school_settings', 'main');
-        const docSnap = await getDoc(docRef);
+        const settingDocId = adminSchool ? `school_${adminSchool}` : 'main';
+        const docRef = doc(db, 'school_settings', settingDocId);
+        let docSnap = await getDoc(docRef);
+        if (!docSnap.exists() && adminSchool) {
+          docSnap = await getDoc(doc(db, 'school_settings', 'main'));
+        }
+
         if (docSnap.exists()) {
           const data = docSnap.data() as any;
           setSchoolLocation(data.location || { lat: -6.200000, lng: 106.816666 });
@@ -74,47 +88,63 @@ export default function AdminDashboard() {
     };
     fetchSettings();
 
-    // Listen to Attendance for this school
-    let q;
-    if (userData?.schoolCode) {
-      q = query(
-        collection(db, 'attendance'),
-        where('schoolCode', '==', userData.schoolCode),
-        orderBy('timestamp', 'desc')
-      );
-    } else {
-      q = query(collection(db, 'attendance'), orderBy('timestamp', 'desc'));
+    // If admin has no schoolCode, isolate and do NOT fetch other schools' data!
+    if (!adminSchool) {
+      setAttendances([]);
+      setUsersList([]);
+      return;
     }
 
+    // Support both lowercase and uppercase variations for backwards compatibility
+    const possibleSchoolCodes = Array.from(new Set([
+      adminSchool,
+      adminSchool.toLowerCase(),
+      adminSchool.toUpperCase()
+    ]));
+
+    // Listen to Attendance strictly for this school
+    const q = query(
+      collection(db, 'attendance'),
+      where('schoolCode', 'in', possibleSchoolCodes),
+      orderBy('timestamp', 'desc')
+    );
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter((item: any) => normalizeSchoolCode(item.schoolCode) === adminSchool);
       setAttendances(data);
     }, (err) => {
-      console.warn("Attendance query error, falling back without index:", err);
+      console.warn("Attendance query error, falling back with client-side filter:", err);
       const fallbackQ = query(collection(db, 'attendance'));
       onSnapshot(fallbackQ, (snap) => {
-        let data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        if (userData?.schoolCode) {
-          data = data.filter((d: any) => d.schoolCode === userData.schoolCode);
-        }
+        const data = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter((item: any) => normalizeSchoolCode(item.schoolCode) === adminSchool);
         setAttendances(data);
       });
     });
 
-    // Listen to Users for this school
-    let qUsers;
-    if (userData?.schoolCode) {
-      qUsers = query(
-        collection(db, 'users'),
-        where('schoolCode', '==', userData.schoolCode)
-      );
-    } else {
-      qUsers = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-    }
+    // Listen to Users strictly for this school
+    const qUsers = query(
+      collection(db, 'users'),
+      where('schoolCode', 'in', possibleSchoolCodes)
+    );
 
     const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter((u: any) => normalizeSchoolCode(u.schoolCode) === adminSchool);
       setUsersList(data);
+    }, (err) => {
+      console.warn("Users query error, falling back with client-side filter:", err);
+      const fallbackUsersQ = query(collection(db, 'users'));
+      onSnapshot(fallbackUsersQ, (snap) => {
+        const data = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter((u: any) => normalizeSchoolCode(u.schoolCode) === adminSchool);
+        setUsersList(data);
+      });
     });
 
     return () => {
@@ -129,10 +159,23 @@ export default function AdminDashboard() {
   };
 
   const handleSaveSettings = async () => {
-    await setDoc(doc(db, 'school_settings', 'main'), {
+    const adminSchool = normalizeSchoolCode(userData?.schoolCode);
+    const settingDocId = adminSchool ? `school_${adminSchool}` : 'main';
+    await setDoc(doc(db, 'school_settings', settingDocId), {
       location: schoolLocation,
-      radius: schoolRadius
-    });
+      radius: schoolRadius,
+      schoolCode: adminSchool || 'DEFAULT',
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+
+    // Also update main if setting default
+    if (!adminSchool) {
+      await setDoc(doc(db, 'school_settings', 'main'), {
+        location: schoolLocation,
+        radius: schoolRadius
+      }, { merge: true });
+    }
+
     alert(t.settingsSaved);
   };
 
@@ -153,14 +196,16 @@ export default function AdminDashboard() {
     doc.text(t.recapTitle, 14, 15);
     
     autoTable(doc, {
-      head: [[t.teacherName, t.date, t.time, t.status, t.attType || 'Jenis', t.distance]],
+      head: [[t.teacherName, t.date, t.time, t.status, t.attType || 'Jenis', t.distance, 'Akurasi GPS', 'Verifikasi Selfie']],
       body: filteredAttendances.map(a => [
         a.teacherName,
         a.date,
         a.timestamp ? format(a.timestamp.toDate(), 'HH:mm:ss') : '-',
         a.status,
         a.type || '-',
-        a.distanceFromSchool !== undefined ? `${Math.round(a.distanceFromSchool)}m` : '-'
+        a.distanceFromSchool !== undefined ? `${Math.round(a.distanceFromSchool)}m` : '-',
+        a.gpsAccuracy ? `±${a.gpsAccuracy}m` : (a.isAnomalyDetected ? 'Anomali' : '-'),
+        a.photoSelfie ? 'Valid (Foto Wajah)' : '-'
       ]),
       startY: 20
     });
@@ -175,7 +220,9 @@ export default function AdminDashboard() {
       [t.time]: a.timestamp ? format(a.timestamp.toDate(), 'HH:mm:ss') : '-',
       [t.status]: a.status,
       [t.attType || 'Jenis']: a.type || '-',
-      [t.distance]: a.distanceFromSchool !== undefined ? Math.round(a.distanceFromSchool) : '-'
+      [t.distance]: a.distanceFromSchool !== undefined ? Math.round(a.distanceFromSchool) : '-',
+      'Akurasi GPS': a.gpsAccuracy ? `±${a.gpsAccuracy}m` : (a.isAnomalyDetected ? 'Anomali Fake GPS' : '-'),
+      'Status Foto Selfie': a.photoSelfie ? 'Terverifikasi (Selfie)' : 'Tanpa Foto'
     })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Absensi Guru");
@@ -491,9 +538,9 @@ export default function AdminDashboard() {
                     <thead>
                       <tr className="bg-gray-50/75 dark:bg-gray-900/50 text-gray-500 uppercase tracking-wider font-semibold">
                         <th className="px-4 py-3 text-left">{t.teacherName}</th>
-                        <th className="px-4 py-3 text-left">{t.date}</th>
-                        <th className="px-4 py-3 text-left">{t.time}</th>
-                        <th className="px-4 py-3 text-left">{t.distance}</th>
+                        <th className="px-4 py-3 text-left">Foto Wajah</th>
+                        <th className="px-4 py-3 text-left">{t.date} & {t.time}</th>
+                        <th className="px-4 py-3 text-left">Jarak & Akurasi GPS</th>
                         <th className="px-4 py-3 text-left">{t.attType || 'Jenis'}</th>
                         <th className="px-4 py-3 text-left">{t.status}</th>
                       </tr>
@@ -513,11 +560,53 @@ export default function AdminDashboard() {
 
                           return (
                             <tr key={a.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
-                              <td className="px-4 py-3 whitespace-nowrap font-semibold text-gray-900 dark:text-white">{a.teacherName}</td>
-                              <td className="px-4 py-3 whitespace-nowrap font-mono text-gray-600 dark:text-gray-300">{a.date}</td>
-                              <td className="px-4 py-3 whitespace-nowrap font-mono text-gray-500 dark:text-gray-400">{timeStr}</td>
-                              <td className="px-4 py-3 whitespace-nowrap text-gray-500 dark:text-gray-400 font-mono">
-                                {a.distanceFromSchool !== undefined && a.distanceFromSchool > 0 ? `${Math.round(a.distanceFromSchool)}m` : '-'}
+                              <td className="px-4 py-3 whitespace-nowrap font-semibold text-gray-900 dark:text-white">
+                                {a.teacherName}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                {a.photoSelfie ? (
+                                  <button
+                                    onClick={() => setSelectedSelfieModal(a)}
+                                    className="relative group rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:ring-2 hover:ring-blue-500 transition-all flex items-center gap-1.5 p-1 bg-gray-50 dark:bg-gray-800"
+                                    title="Klik untuk melihat detail verifikasi foto"
+                                  >
+                                    <img 
+                                      src={a.photoSelfie} 
+                                      alt={a.teacherName} 
+                                      className="w-8 h-8 rounded-lg object-cover" 
+                                    />
+                                    <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 pr-1 group-hover:underline flex items-center gap-0.5">
+                                      <Eye className="w-3 h-3" />
+                                      Lihat
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <span className="text-[11px] text-gray-400 italic">Tanpa Foto</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap font-mono text-gray-600 dark:text-gray-300">
+                                <div>{a.date}</div>
+                                <div className="text-[10px] text-gray-400">{timeStr}</div>
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <div className="font-mono text-gray-700 dark:text-gray-300 text-xs">
+                                  {a.distanceFromSchool !== undefined && a.distanceFromSchool > 0 ? `${Math.round(a.distanceFromSchool)}m dari sekolah` : '-'}
+                                </div>
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  {a.isAnomalyDetected ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 px-1.5 py-0.5 rounded">
+                                      <ShieldAlert className="w-3 h-3" />
+                                      Anomali Fake GPS
+                                    </span>
+                                  ) : a.gpsAccuracy ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded">
+                                      <ShieldCheck className="w-3 h-3" />
+                                      Akurasi ±{a.gpsAccuracy}m
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-400">-</span>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap">
                                 <span className="px-2 py-0.5 rounded-md font-bold text-[11px] bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
@@ -541,6 +630,80 @@ export default function AdminDashboard() {
                       )}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {/* MODAL PREVIEW DETAIL SELFIE VERIFIKASI */}
+            {selectedSelfieModal && (
+              <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                <div className="bg-white dark:bg-gray-900 rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-gray-100 dark:border-gray-800 space-y-4">
+                  <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+                        Verifikasi Keamanan Presensi
+                      </span>
+                      <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                        {selectedSelfieModal.teacherName}
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => setSelectedSelfieModal(null)}
+                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Selfie Photo */}
+                  <div className="w-full aspect-square rounded-2xl overflow-hidden border-2 border-purple-200 dark:border-purple-800 shadow-inner bg-black">
+                    <img
+                      src={selectedSelfieModal.photoSelfie}
+                      alt={selectedSelfieModal.teacherName}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+
+                  {/* Verification Info */}
+                  <div className="space-y-2 text-xs bg-gray-50 dark:bg-gray-800/60 p-3 rounded-2xl border border-gray-100 dark:border-gray-700/60">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500 dark:text-gray-400">Jenis Presensi:</span>
+                      <span className="font-bold text-gray-900 dark:text-white">{selectedSelfieModal.type || 'Presensi'} ({selectedSelfieModal.status})</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500 dark:text-gray-400">Tanggal & Jam:</span>
+                      <span className="font-mono text-gray-900 dark:text-white">
+                        {selectedSelfieModal.date} {selectedSelfieModal.timestamp ? format(selectedSelfieModal.timestamp.toDate(), 'HH:mm:ss') : ''}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500 dark:text-gray-400">Jarak dari Sekolah:</span>
+                      <span className="font-mono text-gray-900 dark:text-white">
+                        {selectedSelfieModal.distanceFromSchool !== undefined ? `${Math.round(selectedSelfieModal.distanceFromSchool)} meter` : '-'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500 dark:text-gray-400">Akurasi GPS Satelit:</span>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        {selectedSelfieModal.gpsAccuracy ? `±${selectedSelfieModal.gpsAccuracy}m` : 'Terverifikasi'}
+                      </span>
+                    </div>
+
+                    {selectedSelfieModal.isAnomalyDetected && (
+                      <div className="mt-2 p-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-xl text-red-700 dark:text-red-300 text-[11px] flex items-start gap-1.5">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
+                        <span><strong>Peringatan Keamanan:</strong> {selectedSelfieModal.anomalyReason || 'Terdeteksi anomali GPS.'}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => setSelectedSelfieModal(null)}
+                    className="w-full py-2.5 rounded-xl bg-gray-900 hover:bg-gray-800 dark:bg-gray-100 dark:hover:bg-white text-white dark:text-gray-900 text-xs font-semibold transition-colors"
+                  >
+                    Tutup Detail
+                  </button>
                 </div>
               </div>
             )}

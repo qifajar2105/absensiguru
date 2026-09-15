@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { auth } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
@@ -12,7 +12,9 @@ import {
   Users, 
   CheckSquare, 
   CalendarCheck,
-  Camera
+  Camera,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { ThemeLanguageToggle } from '../components/ThemeLanguageToggle';
 import { translations } from '../lib/translations';
@@ -32,6 +34,20 @@ export default function TeacherDashboard() {
 
   const [activeTab, setActiveTab] = useState<'attendance' | 'studentAttendance' | 'subjects' | 'students'>('attendance');
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const { permission, requestPermission } = usePushReminder(false, false);
 
@@ -99,6 +115,28 @@ export default function TeacherDashboard() {
         </div>
 
         <div className="flex items-center space-x-1.5 sm:space-x-2">
+          {/* Connection Status Pill */}
+          <div 
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+              isOnline 
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/60'
+                : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 animate-pulse'
+            }`}
+            title={isOnline ? 'Koneksi internet aktif & sinkron' : 'Koneksi internet terputus. Data diakses dari memori lokal Service Worker.'}
+          >
+            {isOnline ? (
+              <>
+                <Wifi className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Online</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>Offline (Lokal)</span>
+              </>
+            )}
+          </div>
+
           {permission === 'granted' ? (
             <button 
               onClick={() => {
@@ -196,6 +234,16 @@ export default function TeacherDashboard() {
           </button>
         </div>
       </div>
+
+      {/* OFFLINE MODE ALERT BANNER */}
+      {!isOnline && (
+        <div className="bg-amber-500 text-white px-4 py-2 text-xs font-semibold flex items-center justify-center gap-2 shadow-xs transition-all">
+          <WifiOff className="w-4 h-4 shrink-0" />
+          <span>
+            Mode Offline Aktif: Koneksi internet tidak stabil atau terputus. Anda tetap dapat melihat seluruh jadwal mengajar, mata pelajaran, dan daftar siswa dari memori lokal Service Worker.
+          </span>
+        </div>
+      )}
 
       {/* MAIN BODY CONTENT */}
       <main className="flex-1 p-4 sm:p-8 max-w-6xl w-full mx-auto">

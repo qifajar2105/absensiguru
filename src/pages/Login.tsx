@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { translations } from '../lib/translations';
 import { ThemeLanguageToggle } from '../components/ThemeLanguageToggle';
-
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { isPrimarySuperAdmin } from '../lib/utils';
+import { isPrimarySuperAdmin, getSuperAdminAccessCode, normalizeSchoolCode } from '../lib/utils';
+import { ShieldCheck, Eye, EyeOff, Lock } from 'lucide-react';
 
 export default function Login() {
   const [error, setError] = useState('');
@@ -17,6 +16,8 @@ export default function Login() {
   const [tempUser, setTempUser] = useState<any>(null);
   const [selectedRole, setSelectedRole] = useState<'admin' | 'teacher' | 'superadmin'>('teacher');
   const [schoolCode, setSchoolCode] = useState('');
+  const [superAdminPasscode, setSuperAdminPasscode] = useState('');
+  const [showSuperAdminCode, setShowSuperAdminCode] = useState(false);
   const navigate = useNavigate();
   const { userData, setUserData, language, theme } = useStore();
   const t = translations[language];
@@ -30,7 +31,7 @@ export default function Login() {
     }
   }, [userData, navigate]);
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = async (preselectedRole?: 'superadmin') => {
     setError('');
     setLoading(true);
     const provider = new GoogleAuthProvider();
@@ -44,20 +45,30 @@ export default function Login() {
         const data = userDoc.data() as any;
         
         // Ensure main super admin is always a super admin
-        if (isPrimarySuperAdmin(user.email) && data.role !== 'superadmin') {
-          data.role = 'superadmin';
-          data.schoolCode = 'SUPERADMIN';
-          await setDoc(doc(db, 'users', user.uid), { role: 'superadmin', schoolCode: 'SUPERADMIN' }, { merge: true });
-        }
-        
-        // Ensure other valid superadmins are superadmins
-        if (data.role !== 'superadmin' && !isPrimarySuperAdmin(user.email)) {
-          const qSuper = query(collection(db, 'superadmins'), where('email', '==', user.email?.toLowerCase()));
-          const superAdminsSnap = await getDocs(qSuper);
-          if (!superAdminsSnap.empty) {
+        if (isPrimarySuperAdmin(user.email)) {
+          if (data.role !== 'superadmin') {
             data.role = 'superadmin';
             data.schoolCode = 'SUPERADMIN';
             await setDoc(doc(db, 'users', user.uid), { role: 'superadmin', schoolCode: 'SUPERADMIN' }, { merge: true });
+          }
+        } else {
+          // Check if in superadmins collection
+          const qSuper = query(collection(db, 'superadmins'), where('email', '==', user.email?.toLowerCase()));
+          const superAdminsSnap = await getDocs(qSuper);
+          if (!superAdminsSnap.empty) {
+            if (data.role !== 'superadmin') {
+              data.role = 'superadmin';
+              data.schoolCode = 'SUPERADMIN';
+              await setDoc(doc(db, 'users', user.uid), { role: 'superadmin', schoolCode: 'SUPERADMIN' }, { merge: true });
+            }
+          } else if (data.role === 'superadmin' || preselectedRole === 'superadmin') {
+            // User claims superadmin but is not verified yet, or requested superadmin login
+            setTempUser(user);
+            setSelectedRole('superadmin');
+            setNeedsRole(true);
+            setError('Peran Super Admin memerlukan kode khusus verifikasi keamanan.');
+            setLoading(false);
+            return;
           }
         }
 
@@ -69,7 +80,8 @@ export default function Login() {
         
         // Check license expiration if not superadmin
         if (data.role !== 'superadmin') {
-          const q = query(collection(db, 'licenses'), where('code', '==', data.schoolCode || ''));
+          const normSchool = normalizeSchoolCode(data.schoolCode);
+          const q = query(collection(db, 'licenses'), where('code', '==', normSchool));
           const querySnapshot = await getDocs(q);
           if (querySnapshot.empty) {
             setError(t.schoolCodeError || 'Lisensi sekolah tidak ditemukan.');
@@ -90,6 +102,9 @@ export default function Login() {
         else navigate('/teacher');
       } else {
         setTempUser(user);
+        if (preselectedRole === 'superadmin') {
+          setSelectedRole('superadmin');
+        }
         setNeedsRole(true);
       }
     } catch (err: any) {
@@ -103,9 +118,11 @@ export default function Login() {
     e.preventDefault();
     if (!tempUser) return;
     
-    // BASIC LICENSE/MULTI-TENANT CHECK
-    if (selectedRole !== 'superadmin' && schoolCode.trim().length < 4) {
-      setError(t.schoolCodeError);
+    const normSchool = normalizeSchoolCode(schoolCode);
+
+    // BASIC LICENSE/MULTI-TENANT CHECK for non-superadmin
+    if (selectedRole !== 'superadmin' && normSchool.length < 3) {
+      setError(t.schoolCodeError || 'Kode sekolah minimal 3 karakter.');
       return;
     }
     
@@ -115,7 +132,7 @@ export default function Login() {
     // Check school license
     if (selectedRole !== 'superadmin') {
       try {
-        const q = query(collection(db, 'licenses'), where('code', '==', schoolCode.trim().toUpperCase()));
+        const q = query(collection(db, 'licenses'), where('code', '==', normSchool));
         const querySnapshot = await getDocs(q);
         if (querySnapshot.empty) {
           setError(t.schoolCodeError);
@@ -142,31 +159,50 @@ export default function Login() {
 
     try {
       let finalRole = selectedRole;
-      if (isPrimarySuperAdmin(tempUser.email)) {
+
+      if (selectedRole === 'superadmin') {
+        const isPrimary = isPrimarySuperAdmin(tempUser.email);
+        if (!isPrimary) {
+          const activeCode = await getSuperAdminAccessCode();
+          if (superAdminPasscode.trim() !== activeCode) {
+            setError('Kode khusus Super Admin salah! Anda tidak memiliki izin menjadi Super Admin.');
+            setLoading(false);
+            return;
+          }
+
+          // Register in superadmins collection
+          await setDoc(doc(db, 'superadmins', tempUser.uid), {
+            email: tempUser.email?.toLowerCase(),
+            name: tempUser.displayName || 'Super Admin',
+            addedBy: 'Kode Khusus (Otentikasi Login)',
+            createdAt: serverTimestamp()
+          }, { merge: true });
+        }
         finalRole = 'superadmin';
       } else {
-        const qSuper = query(collection(db, 'superadmins'), where('email', '==', tempUser.email?.toLowerCase()));
-        const superAdminsSnap = await getDocs(qSuper);
-        if (!superAdminsSnap.empty) {
+        if (isPrimarySuperAdmin(tempUser.email)) {
           finalRole = 'superadmin';
+        } else {
+          finalRole = selectedRole;
         }
       }
 
+      const cleanSchoolCode = finalRole === 'superadmin' ? 'SUPERADMIN' : normSchool;
       const newUserData = {
         uid: tempUser.uid,
         email: tempUser.email,
         name: tempUser.displayName || 'Pengguna Baru',
         role: finalRole,
         photoURL: tempUser.photoURL || '',
-        schoolCode: finalRole === 'superadmin' ? 'SUPERADMIN' : schoolCode.trim().toUpperCase(),
+        schoolCode: cleanSchoolCode,
         createdAt: new Date().toISOString()
       };
       
       await setDoc(doc(db, 'users', tempUser.uid), newUserData);
       setUserData(newUserData as any);
       
-      if (selectedRole === 'superadmin') navigate('/superadmin');
-      else if (selectedRole === 'admin') navigate('/admin');
+      if (finalRole === 'superadmin') navigate('/superadmin');
+      else if (finalRole === 'admin') navigate('/admin');
       else navigate('/teacher');
     } catch (err: any) {
       setError(err.message || t.failed);
@@ -284,7 +320,7 @@ export default function Login() {
           {!needsRole ? (
             <div className="space-y-4">
               <button
-                onClick={handleGoogleLogin}
+                onClick={() => handleGoogleLogin()}
                 disabled={loading}
                 className="w-full flex justify-center items-center py-3.5 px-4 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm text-sm font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:hover:translate-y-0 transition-all duration-200"
               >
@@ -303,7 +339,39 @@ export default function Login() {
                 </div>
                 
                 <div className="space-y-4">
-                  {selectedRole !== 'superadmin' && (
+                  {selectedRole === 'superadmin' ? (
+                    <div className="p-4 bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/80 rounded-xl space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-amber-600" />
+                          Kode Khusus Super Admin Wajib Diisi
+                        </label>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 bg-amber-200/70 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 rounded-full">
+                          Verifikasi PIN
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300/80 leading-relaxed">
+                        Masukkan kode otorisasi keamanan untuk memvalidasi hak akses Super Admin.
+                      </p>
+                      <div className="relative">
+                        <input
+                          type={showSuperAdminCode ? 'text' : 'password'}
+                          required
+                          value={superAdminPasscode}
+                          onChange={(e) => setSuperAdminPasscode(e.target.value)}
+                          placeholder="Masukkan kode khusus Super Admin"
+                          className="block w-full pl-4 pr-10 py-2.5 text-sm bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tracking-wider"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSuperAdminCode(!showSuperAdminCode)}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-amber-700 dark:text-amber-400 hover:text-amber-900"
+                        >
+                          {showSuperAdminCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{t.schoolCode}</label>
                       <input
@@ -312,7 +380,7 @@ export default function Login() {
                         value={schoolCode}
                         onChange={(e) => setSchoolCode(e.target.value)}
                         placeholder={t.schoolCodePlaceholder}
-                        className="block w-full px-4 py-3 text-base bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-xl border transition-colors uppercase"
+                        className="block w-full px-4 py-3 text-base bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-xl border transition-colors uppercase font-medium"
                       />
                     </div>
                   )}
@@ -327,7 +395,7 @@ export default function Login() {
                       >
                         <option value="teacher">{t.roleTeacher}</option>
                         <option value="admin">{t.roleAdmin}</option>
-                        <option value="superadmin">👑 Super Admin</option>
+                        <option value="superadmin">Super Admin</option>
                       </select>
                       <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500 dark:text-gray-400">
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
