@@ -3,7 +3,8 @@ import { useStore } from '../../store/useStore';
 import { db } from '../../lib/firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { Subject } from '../../types';
-import { BookOpen, Plus, Edit2, Trash2, X, Users, Clock, WifiOff, CheckCircle2 } from 'lucide-react';
+import { BookOpen, Plus, Edit2, Trash2, X, Users,
+  Lock, Clock, WifiOff, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { translations } from '../../lib/translations';
 import { normalizeSchoolCode } from '../../lib/utils';
@@ -221,25 +222,39 @@ export default function TeacherSubjectsView() {
                     Kelas {sub.classGrade}
                   </span>
                   <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleOpenEdit(sub)}
-                      className="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      title={t.editSubject}
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(sub.id, sub.name)}
-                      className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      title={t.deleteSubject}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {sub.isLocked ? (
+                      <div className="p-1.5 text-amber-500 bg-amber-50 dark:bg-amber-900/20 rounded-lg flex items-center gap-1" title="Dikunci oleh Admin">
+                        <Lock className="w-3.5 h-3.5" />
+                        <span className="text-[10px] font-bold">Dikunci</span>
+                      </div>
+                    ) : sub.teacherId === userData?.uid ? (
+                      <>
+                        <button
+                          onClick={() => handleOpenEdit(sub)}
+                          className="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          title={t.editSubject}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(sub.id, sub.name)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          title={t.deleteSubject}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-[10px] font-medium text-gray-400 bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded-lg">
+                        Bukan Pengampu
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight">
+                <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight flex items-center gap-2">
                   {sub.name}
+                  {sub.isLocked && <Lock className="w-3.5 h-3.5 text-amber-500" />}
                 </h3>
 
                 {sub.schedule && (
@@ -251,7 +266,7 @@ export default function TeacherSubjectsView() {
               </div>
 
               <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-[11px] text-gray-400">
-                <span>Sekolah: {sub.schoolCode || userData?.schoolCode || '-'}</span>
+                <span>Pengampu: <span className="font-semibold text-gray-600 dark:text-gray-300">{sub.teacherName || '-'}</span></span>
                 <span className="text-emerald-600 dark:text-emerald-400 font-medium">Tersinkronisasi</span>
               </div>
             </div>

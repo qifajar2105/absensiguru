@@ -10,6 +10,7 @@ export interface UserData {
   schoolCode?: string;
   photoURL?: string;
   createdAt?: any;
+  isLocked?: boolean;
 }
 
 export interface Subject {
@@ -21,6 +22,7 @@ export interface Subject {
   teacherName: string;
   schoolCode: string;
   createdAt?: any;
+  isLocked?: boolean;
 }
 
 export interface Student {
@@ -32,6 +34,7 @@ export interface Student {
   schoolCode: string;
   teacherId?: string;
   createdAt?: any;
+  isLocked?: boolean;
 }
 
 export type StudentStatus = 'Hadir' | 'Sakit' | 'Izin' | 'Alpa';

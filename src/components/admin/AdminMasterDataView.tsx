@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { useStore } from '../../store/useStore';
-import { db } from '../../lib/firebase';
-import { collection, query, where, onSnapshot, deleteDoc, doc, addDoc, updateDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { Student, Subject } from '../../types';
-import { 
-  Users, 
+import {
+  useStore } from '../../store/useStore';
+import {
+  db } from '../../lib/firebase';
+import {
+  collection, query, where, onSnapshot, deleteDoc, doc, addDoc, updateDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import {
+  Student, Subject } from '../../types';
+import {
+  
+  Users, Lock, 
   BookOpen, 
   Plus, 
   Edit2, 
@@ -16,10 +21,12 @@ import {
   GraduationCap
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { translations } from '../../lib/translations';
-import { normalizeSchoolCode } from '../../lib/utils';
+import {
+  translations } from '../../lib/translations';
+import {
+  normalizeSchoolCode } from '../../lib/utils';
 
-export default function AdminMasterDataView() {
+export default function AdminMasterDataView({ usersList = [] }: { usersList?: any[] }) {
   const { userData, language } = useStore();
   const t = translations[language];
 
@@ -56,6 +63,8 @@ export default function AdminMasterDataView() {
   const [subClass, setSubClass] = useState('');
   const [subSchedule, setSubSchedule] = useState('');
   const [subTeacherName, setSubTeacherName] = useState('');
+  const [subTeacherId, setSubTeacherId] = useState('');
+  const [subIsLocked, setSubIsLocked] = useState(false);
 
   useEffect(() => {
     const adminSchool = normalizeSchoolCode(userData?.schoolCode);
@@ -210,13 +219,25 @@ export default function AdminMasterDataView() {
       return;
     }
     const adminSchool = normalizeSchoolCode(userData?.schoolCode);
+    
+    // Auto-resolve teacher name if ID is selected
+    let finalTeacherName = subTeacherName.trim();
+    if (subTeacherId) {
+      const selectedTeacher = usersList.find(u => u.id === subTeacherId);
+      if (selectedTeacher) {
+        finalTeacherName = selectedTeacher.name;
+      }
+    }
+
     try {
       if (editingSubject) {
         await updateDoc(doc(db, 'subjects', editingSubject.id), {
           name: subName.trim(),
           classGrade: subClass.trim(),
           schedule: subSchedule.trim(),
-          teacherName: subTeacherName.trim() || editingSubject.teacherName,
+          teacherName: finalTeacherName || editingSubject.teacherName,
+          teacherId: subTeacherId || editingSubject.teacherId,
+          isLocked: subIsLocked,
           updatedAt: serverTimestamp()
         });
         toast.success('Mata pelajaran diperbarui!');
@@ -225,8 +246,9 @@ export default function AdminMasterDataView() {
           name: subName.trim(),
           classGrade: subClass.trim(),
           schedule: subSchedule.trim(),
-          teacherName: subTeacherName.trim() || 'Admin Sekolah',
-          teacherId: userData?.uid,
+          teacherName: finalTeacherName || 'Admin Sekolah',
+          teacherId: subTeacherId || userData?.uid,
+          isLocked: subIsLocked,
           schoolCode: adminSchool || 'DEFAULT',
           createdAt: serverTimestamp()
         });
@@ -465,6 +487,8 @@ export default function AdminMasterDataView() {
                 setSubClass('');
                 setSubSchedule('');
                 setSubTeacherName('');
+                setSubTeacherId('');
+                setSubIsLocked(false);
                 setIsSubjectModalOpen(true);
               }}
               className="inline-flex items-center px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow transition-colors gap-1.5 self-end sm:self-auto"
@@ -502,7 +526,10 @@ export default function AdminMasterDataView() {
                     filteredSubjects.map((sub, idx) => (
                       <tr key={sub.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
                         <td className="py-3 px-4 text-center font-mono text-gray-400">{idx + 1}</td>
-                        <td className="py-3 px-4 font-bold text-gray-900 dark:text-white">{sub.name}</td>
+                        <td className="py-3 px-4 font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                          {sub.name}
+                          {sub.isLocked && <Lock className="w-3.5 h-3.5 text-amber-500" title="Mapel Dikunci" />}
+                        </td>
                         <td className="py-3 px-4">
                           <span className="px-2 py-0.5 rounded-md font-bold text-[11px] bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
                             Kelas {sub.classGrade}
@@ -519,6 +546,8 @@ export default function AdminMasterDataView() {
                                 setSubClass(sub.classGrade);
                                 setSubSchedule(sub.schedule || '');
                                 setSubTeacherName(sub.teacherName);
+                                setSubTeacherId(sub.teacherId || '');
+                                setSubIsLocked(sub.isLocked || false);
                                 setIsSubjectModalOpen(true);
                               }}
                               className="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -708,12 +737,22 @@ export default function AdminMasterDataView() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1 text-gray-700 dark:text-gray-300">Guru Pengampu</label>
+                <label className="block text-xs font-semibold mb-1 text-gray-700 dark:text-gray-300">Pilih Guru Pengampu</label>
+                <select
+                  value={subTeacherId}
+                  onChange={(e) => setSubTeacherId(e.target.value)}
+                  className="w-full text-xs p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white mb-2"
+                >
+                  <option value="">-- Pilih Guru --</option>
+                  {usersList.map((user: any) => (
+                    <option key={user.id} value={user.id}>{user.name}</option>
+                  ))}
+                </select>
                 <input
                   type="text"
                   value={subTeacherName}
                   onChange={(e) => setSubTeacherName(e.target.value)}
-                  placeholder="Nama guru yang mengajar"
+                  placeholder="Atau ketik nama guru manual"
                   className="w-full text-xs p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                 />
               </div>
@@ -726,6 +765,19 @@ export default function AdminMasterDataView() {
                   placeholder="Contoh: Rabu, 09.30 - 11.00"
                   className="w-full text-xs p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                 />
+              </div>
+              
+              <div className="flex items-center gap-2 mt-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-100 dark:border-amber-900/50">
+                <input
+                  type="checkbox"
+                  id="lockSubject"
+                  checked={subIsLocked}
+                  onChange={(e) => setSubIsLocked(e.target.checked)}
+                  className="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500"
+                />
+                <label htmlFor="lockSubject" className="text-xs font-semibold text-amber-800 dark:text-amber-400 cursor-pointer">
+                  Kunci Mapel (Hanya Admin yang bisa edit)
+                </label>
               </div>
               <div className="flex gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
                 <button

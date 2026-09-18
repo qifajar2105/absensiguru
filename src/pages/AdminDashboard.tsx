@@ -394,7 +394,7 @@ export default function AdminDashboard() {
 
             {/* 2. MASTER DATA (STUDENTS & SUBJECTS) TAB */}
             {activeTab === 'masterData' && (
-              <AdminMasterDataView />
+              <AdminMasterDataView usersList={usersList} />
             )}
 
             {/* 3. USERS TAB */}
