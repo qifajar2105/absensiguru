@@ -320,33 +320,33 @@ export default function TeacherAttendanceView({ onScanCountChange }: TeacherAtte
       return;
     }
 
-    const targetLat = schoolSettings.location?.lat ?? schoolSettings.lat;
-    const targetLng = schoolSettings.location?.lng ?? schoolSettings.lng;
-    const targetRadius = schoolSettings.radius || 100;
+    const targetLat = Number(schoolSettings.location?.lat ?? schoolSettings.lat);
+    const targetLng = Number(schoolSettings.location?.lng ?? schoolSettings.lng);
+    const targetRadius = Number(schoolSettings.radius || 100);
 
-    if (targetLat === undefined || targetLng === undefined) {
+    if (isNaN(targetLat) || isNaN(targetLng)) {
       toast.error('Pengaturan lokasi sekolah belum valid. Hubungi admin.');
       setAttendanceStatus('error');
-      setStatusMessage('Gagal mencatat absensi: Pengaturan lokasi sekolah tidak ditemukan.');
+      setStatusMessage('Gagal mencatat absensi: Pengaturan lokasi sekolah tidak ditemukan/invalid.');
       setIsProcessingScan(false);
       return;
     }
 
     const distance = calculateDistance(
-      location.lat, 
-      location.lng, 
+      Number(location.lat), 
+      Number(location.lng), 
       targetLat, 
       targetLng
     );
 
-    // Incorporate GPS accuracy as a tolerance buffer. Cap tolerance at 50 meters to prevent spoofing.
-    const accuracyTolerance = Math.min(gpsAccuracy || 20, 50);
+    // Incorporate GPS accuracy as a tolerance buffer. Cap tolerance at 1500 meters to accommodate devices with very poor indoor GPS or laptop Wi-Fi tracking.
+    const accuracyTolerance = Math.min(Math.max(Number(gpsAccuracy) || 50, 150), 1500);
     const effectiveRadius = targetRadius + accuracyTolerance;
 
     if (distance > effectiveRadius) {
       toast.error(`${t.outOfRange} ${Math.round(distance)}m`);
       setAttendanceStatus('error');
-      setStatusMessage(`${t.outOfRangeDesc} (Jarak Anda: ${Math.round(distance)}m, Batas: ${targetRadius}m + Toleransi GPS: ${accuracyTolerance}m). ${t.fakeGPS}`);
+      setStatusMessage(`${t.outOfRangeDesc} Jarak: ${Math.round(distance)}m (Batas: ${targetRadius}m + Toleransi: ${accuracyTolerance}m). Koordinat Target: ${targetLat.toFixed(5)},${targetLng.toFixed(5)} | Anda: ${Number(location.lat).toFixed(5)},${Number(location.lng).toFixed(5)}`);
       setIsProcessingScan(false);
       return;
     }
