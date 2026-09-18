@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { X, Upload, Camera, Trash2, Check, AlertCircle, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, Upload, Camera, Trash2, Check, AlertCircle, Loader2, User } from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
 import { auth, db } from '../../lib/firebase';
@@ -18,6 +18,16 @@ export default function ProfilePhotoModal({ isOpen, onClose }: ProfilePhotoModal
   const [success, setSuccess] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [editName, setEditName] = useState('');
+  const [editTitle, setEditTitle] = useState('');
+
+  useEffect(() => {
+    if (userData) {
+      setEditName(userData.name || '');
+      setEditTitle(userData.academicTitle || '');
+    }
+  }, [userData, isOpen]);
 
   if (!isOpen) return null;
 
@@ -99,7 +109,7 @@ export default function ProfilePhotoModal({ isOpen, onClose }: ProfilePhotoModal
   };
 
   const handleSave = async () => {
-    if (!preview || !userData?.uid) return;
+    if (!userData?.uid) return;
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -107,16 +117,22 @@ export default function ProfilePhotoModal({ isOpen, onClose }: ProfilePhotoModal
     try {
       // 1. Update Firestore user document
       const userDocRef = doc(db, 'users', userData.uid);
-      await updateDoc(userDocRef, {
-        photoURL: preview,
-      });
+      const updates: any = {
+        name: editName.trim(),
+        academicTitle: editTitle.trim(),
+      };
+      if (preview) {
+        updates.photoURL = preview;
+      }
+      
+      await updateDoc(userDocRef, updates);
 
       // 2. Update Firebase Auth user profile if available
       if (auth.currentUser) {
         try {
-          await updateProfile(auth.currentUser, {
-            photoURL: preview,
-          });
+          const authUpdates: any = { displayName: editName.trim() };
+          if (preview) authUpdates.photoURL = preview;
+          await updateProfile(auth.currentUser, authUpdates);
         } catch (authErr) {
           console.warn('Auth updateProfile notice:', authErr);
         }
@@ -125,16 +141,18 @@ export default function ProfilePhotoModal({ isOpen, onClose }: ProfilePhotoModal
       // 3. Update Zustand local store
       setUserData({
         ...userData,
-        photoURL: preview,
+        name: editName.trim(),
+        academicTitle: editTitle.trim(),
+        ...(preview ? { photoURL: preview } : {})
       });
 
-      setSuccess('Foto profil berhasil diperbarui!');
+      setSuccess('Profil berhasil diperbarui!');
       setTimeout(() => {
         onClose();
       }, 1200);
     } catch (err: any) {
-      console.error('Error saving profile photo:', err);
-      setError(err.message || 'Gagal menyimpan foto profil.');
+      console.error('Error saving profile:', err);
+      setError(err.message || 'Gagal menyimpan profil.');
     } finally {
       setLoading(false);
     }
@@ -197,8 +215,8 @@ export default function ProfilePhotoModal({ isOpen, onClose }: ProfilePhotoModal
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Camera className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <h3 className="text-base font-bold text-gray-900 dark:text-white">Ganti Foto Profil</h3>
+            <User className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h3 className="text-base font-bold text-gray-900 dark:text-white">Edit Profil</h3>
           </div>
           <button
             onClick={onClose}
@@ -228,7 +246,7 @@ export default function ProfilePhotoModal({ isOpen, onClose }: ProfilePhotoModal
           {/* Current / Preview Image Display */}
           <div className="flex flex-col items-center justify-center">
             <div className="relative group">
-              <div className="w-32 h-32 rounded-2xl overflow-hidden border-4 border-white dark:border-gray-800 shadow-md bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white text-3xl font-bold">
+              <div className="w-24 h-24 rounded-2xl overflow-hidden border-4 border-white dark:border-gray-800 shadow-md bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white text-3xl font-bold">
                 {displayImage ? (
                   <img
                     src={displayImage}
@@ -246,12 +264,33 @@ export default function ProfilePhotoModal({ isOpen, onClose }: ProfilePhotoModal
                 className="absolute inset-0 bg-black/40 text-white rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 text-xs font-semibold"
               >
                 <Camera className="w-5 h-5" />
-                <span>Pilih Foto</span>
+                <span>Ubah</span>
               </button>
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2.5 font-medium">
-              {userData?.name}
-            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">Nama Lengkap</label>
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all dark:text-white"
+                placeholder="Misal: Budi Santoso"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">Gelar Akademik <span className="text-gray-400 font-normal">(Opsional)</span></label>
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all dark:text-white"
+                placeholder="Misal: S.Pd., M.Si."
+              />
+            </div>
           </div>
 
           {/* Drag & Drop Area */}
@@ -318,7 +357,7 @@ export default function ProfilePhotoModal({ isOpen, onClose }: ProfilePhotoModal
             <button
               type="button"
               onClick={handleSave}
-              disabled={loading || !preview}
+              disabled={loading || !editName.trim()}
               className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               {loading ? (
@@ -329,7 +368,7 @@ export default function ProfilePhotoModal({ isOpen, onClose }: ProfilePhotoModal
               ) : (
                 <>
                   <Check className="w-3.5 h-3.5" />
-                  Simpan Foto
+                  Simpan Profil
                 </>
               )}
             </button>

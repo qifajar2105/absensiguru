@@ -12,6 +12,7 @@ export interface UserData {
   role: UserRole;
   schoolCode?: string;
   photoURL?: string;
+  academicTitle?: string;
 }
 
 interface AuthState {

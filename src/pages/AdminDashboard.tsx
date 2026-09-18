@@ -50,8 +50,34 @@ export default function AdminDashboard() {
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [selectedSelfieModal, setSelectedSelfieModal] = useState<any | null>(null);
 
-  // Derived state for filtered attendances
-  const filteredAttendances = attendances.filter(a => a.date && a.date.startsWith(selectedMonth));
+  // Derived state for filtered attendances with specific grouping/sorting
+  const filteredAttendances = attendances
+    .filter(a => a.date && a.date.startsWith(selectedMonth))
+    .sort((a, b) => {
+      // 1. Primary Sort: Rank by Type/Status
+      const getRank = (item: any) => {
+        if (item.type === 'Datang') return 1;
+        if (item.status === 'Sakit' || item.status === 'Izin' || item.status === 'Dinas Luar' || item.type === 'Absen Harian') return 2;
+        if (item.type === 'Mengajar') return 3;
+        if (item.type === 'Pulang') return 4;
+        return 5;
+      };
+      
+      const rankA = getRank(a);
+      const rankB = getRank(b);
+      
+      if (rankA !== rankB) return rankA - rankB;
+
+      // 2. Secondary Sort: Date (Newest first)
+      const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : new Date(a.date).getTime();
+      const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : new Date(b.date).getTime();
+      if (timeA !== timeB) return timeB - timeA;
+
+      // 3. Tertiary Sort: Name
+      const nameA = a.teacherName || '';
+      const nameB = b.teacherName || '';
+      return nameA.localeCompare(nameB);
+    });
 
   useEffect(() => {
     // Generate new QR every 10 seconds for dynamic protection

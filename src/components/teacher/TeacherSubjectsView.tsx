@@ -31,8 +31,15 @@ export default function TeacherSubjectsView() {
 
     const teacherSchool = normalizeSchoolCode(userData?.schoolCode) || 'DEFAULT';
 
+    // Support variations to match Admin behavior
+    const possibleCodes = Array.from(new Set([
+      teacherSchool,
+      teacherSchool.toLowerCase(),
+      teacherSchool.toUpperCase()
+    ]));
+
     // 1. Instant cache load (Stale-While-Revalidate pattern)
-    const cached = offlineStorage.getSubjects(teacherSchool, userData.uid);
+    const cached = offlineStorage.getSubjects(teacherSchool);
     if (cached && cached.length > 0) {
       setSubjects(cached);
       setIsFromCache(true);
@@ -47,23 +54,33 @@ export default function TeacherSubjectsView() {
     // 2. Listen to Firestore (updates cache in background or works when reconnected)
     const q = query(
       collection(db, 'subjects'),
-      where('teacherId', '==', userData.uid)
+      where('schoolCode', 'in', possibleCodes)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Subject));
+      const list = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() } as Subject))
+        .filter(s => normalizeSchoolCode(s.schoolCode) === teacherSchool);
+        
       setSubjects(list);
       setIsFromCache(false);
       setLoading(false);
-      // Save fresh copy to local cache
-      offlineStorage.saveSubjects(teacherSchool, userData.uid, list);
+      // Save fresh copy to local cache (without teacherId so it's shared across the school)
+      offlineStorage.saveSubjects(teacherSchool, undefined, list);
       setLastSyncTime(new Date().toISOString());
     }, (err) => {
-      console.error("Error loading subjects (using local offline cache):", err);
-      // If Firestore fails or device is offline, keep showing cached list
-      if (!cached || cached.length === 0) {
+      console.warn("Subjects query error, falling back:", err);
+      // Fallback if 'in' query fails
+      const fallbackQ = query(collection(db, 'subjects'));
+      onSnapshot(fallbackQ, (snap) => {
+        const list = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Subject))
+          .filter(s => normalizeSchoolCode(s.schoolCode) === teacherSchool);
+        setSubjects(list);
+        setIsFromCache(false);
         setLoading(false);
-      }
+        offlineStorage.saveSubjects(teacherSchool, undefined, list);
+      });
     });
 
     return () => unsubscribe();

@@ -14,7 +14,7 @@ import {
   CalendarCheck,
   Camera,
   Wifi,
-  WifiOff
+  WifiOff, History
 } from 'lucide-react';
 import { ThemeLanguageToggle } from '../components/ThemeLanguageToggle';
 import { translations } from '../lib/translations';
@@ -25,6 +25,7 @@ import TeacherAttendanceView from '../components/teacher/TeacherAttendanceView';
 import TeacherSubjectsView from '../components/teacher/TeacherSubjectsView';
 import TeacherStudentsView from '../components/teacher/TeacherStudentsView';
 import TeacherStudentAttendanceView from '../components/teacher/TeacherStudentAttendanceView';
+import TeacherAttendanceHistoryView from '../components/teacher/TeacherAttendanceHistoryView';
 import ProfilePhotoModal from '../components/teacher/ProfilePhotoModal';
 
 export default function TeacherDashboard() {
@@ -32,7 +33,7 @@ export default function TeacherDashboard() {
   const t = translations[language];
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<'attendance' | 'studentAttendance' | 'subjects' | 'students'>('attendance');
+  const [activeTab, setActiveTab] = useState<'attendance' | 'studentAttendance' | 'subjects' | 'students' | 'history'>('attendance');
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
 
@@ -83,8 +84,8 @@ export default function TeacherDashboard() {
               </div>
             </div>
             <div className="overflow-hidden">
-              <h1 className="text-sm font-bold text-gray-900 dark:text-white truncate" title={userData?.name || t.appTitle}>
-                {userData?.name || t.appTitle}
+              <h1 className="text-sm font-bold text-gray-900 dark:text-white truncate" title={`${userData?.name || t.appTitle}${userData?.academicTitle ? ', ' + userData.academicTitle : ''}`}>
+                {userData?.name || t.appTitle}{userData?.academicTitle ? `, ${userData.academicTitle}` : ""}
               </h1>
               {userData?.schoolCode && (
                 <span className="inline-block px-2 py-0.5 mt-1 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
@@ -143,6 +144,18 @@ export default function TeacherDashboard() {
             <Users className="w-5 h-5" />
             {t.tabTeacherStudents}
           </button>
+
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
+              activeTab === 'history'
+                ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800/50'
+            }`}
+          >
+            <History className="w-5 h-5" />
+            Riwayat
+          </button>
         </div>
         
         <div className="p-4 border-t border-gray-100 dark:border-gray-800 space-y-2">
@@ -199,7 +212,7 @@ export default function TeacherDashboard() {
             </div>
             <div>
               <h1 className="text-sm font-bold text-gray-900 dark:text-white leading-tight">
-                {userData?.name || t.appTitle}
+                {userData?.name || t.appTitle}{userData?.academicTitle ? `, ${userData.academicTitle}` : ""}
               </h1>
               {userData?.schoolCode && (
                 <span className="inline-block px-1.5 py-0.5 mt-0.5 rounded text-[9px] font-bold bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
@@ -234,6 +247,7 @@ export default function TeacherDashboard() {
             {activeTab === 'studentAttendance' && <TeacherStudentAttendanceView />}
             {activeTab === 'subjects' && <TeacherSubjectsView />}
             {activeTab === 'students' && <TeacherStudentsView />}
+            {activeTab === 'history' && <TeacherAttendanceHistoryView />}
           </div>
         </main>
 
@@ -285,6 +299,18 @@ export default function TeacherDashboard() {
               <Users className="w-5 h-5" />
             </div>
             <span className="text-[10px] font-bold">Daftar</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`flex flex-col items-center justify-center w-full py-2 ${
+              activeTab === 'history' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
+            }`}
+          >
+            <div className={`p-1 rounded-xl mb-1 ${activeTab === 'history' ? 'bg-blue-50 dark:bg-blue-900/40' : ''}`}>
+              <History className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-bold">Riwayat</span>
           </button>
         </nav>
       </div>
